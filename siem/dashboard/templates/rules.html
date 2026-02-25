@@ -465,6 +465,27 @@
             document.getElementById('editModal').classList.remove('show');
         }
         
+
+        // 모달 필드 변경 → JSON 텍스트 동기화
+        function syncFieldsToJson() {
+            try {
+                const j = JSON.parse(document.getElementById('editJson').value);
+                j.enabled = document.getElementById('editEnabled').checked;
+                j.name = document.getElementById('editName').value;
+                const ruleType = document.getElementById('editRuleType').value;
+                if (ruleType === 'ueba') {
+                    j.weight = parseFloat(document.getElementById('editWeight').value) || j.weight;
+                } else {
+                    if (j.cep) j.cep.severity = document.getElementById('editSeverity').value;
+                }
+                document.getElementById('editJson').value = JSON.stringify(j, null, 2);
+            } catch(e) {}
+        }
+        document.querySelectorAll('#editName,#editWeight,#editSeverity,#editEnabled').forEach(el => {
+            el.addEventListener('change', syncFieldsToJson);
+            el.addEventListener('input', syncFieldsToJson);
+        });
+
         document.getElementById('editForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -505,31 +526,13 @@
                 rule.match.conditions[parseInt(input.dataset.idx)].end = parseInt(input.value);
             });
             
-            // JSON 편집 영역 또는 모달 필드에서 저장 데이터 구성
+            // JSON 텍스트 영역이 최종 소스
             let saveData;
             try {
                 saveData = JSON.parse(document.getElementById('editJson').value);
             } catch(e) {
                 alert('JSON 형식 오류: ' + e.message);
                 return;
-            }
-            // 모달 필드 값으로 오버라이드
-            saveData.enabled = document.getElementById('editEnabled').checked;
-            saveData.name = document.getElementById('editName').value;
-            if (saveData.cep) {
-                saveData.cep.severity = document.getElementById('editSeverity').value;
-                if (document.getElementById('thresholdGroup').style.display !== 'none') {
-                    const tv = parseInt(document.getElementById('editThreshold').value);
-                    saveData.cep.threshold = tv;
-                    if (saveData.aggregate?.count) saveData.aggregate.count.min = tv;
-                }
-                if (saveData.cep.window && document.getElementById('windowGroup').style.display !== 'none') {
-                    saveData.cep.window = document.getElementById('editWindowValue').value + document.getElementById('editWindowUnit').value;
-                    if (saveData.aggregate) saveData.aggregate.within = saveData.cep.window;
-                }
-            }
-            if (saveData.weight !== undefined) {
-                saveData.weight = parseFloat(document.getElementById('editWeight').value);
             }
             
             const res = await fetch(`/api/cep/rules/${ruleId}`, {
