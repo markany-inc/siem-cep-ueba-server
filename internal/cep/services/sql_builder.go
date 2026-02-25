@@ -165,9 +165,9 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 	byFields := toStringSlice(rule["by"], []string{"userId"})
 	aggregate, _ := rule["aggregate"].(map[string]interface{})
 
-	// 출력 필드: by 필드 기반 (기본: userId)
-	selectFields := strings.Join(byFields, ", ")
-	groupFields := strings.Join(byFields, ", ")
+	// 출력 필드: by 필드 + hostname, userIp (alerts 테이블에 필요)
+	selectFields := strings.Join(byFields, ", ") + ", hostname, userIp"
+	groupFields := strings.Join(byFields, ", ") + ", hostname, userIp"
 
 	// ── 통합 JSON: events[] → patterns[].match 변환 ──
 	if len(patterns) == 0 {
