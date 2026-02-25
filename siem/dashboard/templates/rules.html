@@ -406,7 +406,7 @@
             document.getElementById('weightGroup').style.display = isUeba ? 'block' : 'none';
             document.getElementById('severityGroup').style.display = isCep ? 'block' : 'none';
             document.getElementById('windowGroup').style.display = isCep && rule.cep?.window ? 'block' : 'none';
-            document.getElementById('thresholdGroup').style.display = isCep && rule.cep?.threshold > 1 ? 'block' : 'none';
+            const countMin = rule.aggregate?.count?.min || rule.cep?.threshold || 0; document.getElementById('thresholdGroup').style.display = isCep && countMin > 0 ? 'block' : 'none';
             
             if (isUeba) {
                 document.getElementById('editWeight').value = rule.weight;
@@ -420,7 +420,7 @@
                         document.getElementById('editWindowUnit').value = match[2];
                     }
                 }
-                document.getElementById('editThreshold').value = rule.cep?.threshold || 1;
+                document.getElementById('editThreshold').value = rule.aggregate?.count?.min || rule.cep?.threshold || 1;
             }
             
             // 조건 필드
@@ -484,8 +484,10 @@
                     const unit = document.getElementById('editWindowUnit').value;
                     rule.cep.window = val + unit;
                 }
-                if (rule.cep.threshold > 1) {
-                    rule.cep.threshold = parseInt(document.getElementById('editThreshold').value);
+                {
+                    const tv = parseInt(document.getElementById('editThreshold').value);
+                    if (rule.cep) rule.cep.threshold = tv;
+                    if (rule.aggregate?.count) rule.aggregate.count.min = tv;
                 }
             }
             
