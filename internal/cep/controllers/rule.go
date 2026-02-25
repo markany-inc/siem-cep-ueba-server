@@ -45,6 +45,8 @@ func (c *RuleController) Create(ctx echo.Context) error {
 	}
 	rule["ruleId"] = ruleID
 	rule["createdAt"] = time.Now().Format(time.RFC3339)
+	delete(rule, "_id")
+	delete(rule, "id")
 
 	sql := services.BuildSQLFromRule(rule)
 	if sql == "" {
@@ -80,6 +82,8 @@ func (c *RuleController) Update(ctx echo.Context) error {
 
 	rule["ruleId"] = ruleID
 	rule["updatedAt"] = time.Now().Format(time.RFC3339)
+	delete(rule, "_id")
+	delete(rule, "id")
 
 	sql := services.BuildSQLFromRule(rule)
 	if sql == "" {
