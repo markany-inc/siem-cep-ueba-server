@@ -823,8 +823,8 @@ func checkDateRollover() {
 	}
 	log.Printf("[ROLLOVER] 날짜 변경: %s → %s", currentDate, today)
 
-	// 롤오버 전 현재 점수 저장
-	saveScoresBatch()
+	// 롤오버 전 현재 점수 저장 (어제 날짜 인덱스에)
+	saveScoresBatchForDate(strings.ReplaceAll(currentDate, "-", "."))
 
 	currentDate = today
 	userStatesMu.Lock()
@@ -1051,9 +1051,12 @@ func calcMeanStddev(values []float64) (float64, float64) {
 // ===== 점수 저장 (10분 배치) =====
 
 func saveScoresBatch() {
+	saveScoresBatchForDate(time.Now().In(loc).Format("2006.01.02"))
+}
+
+func saveScoresBatchForDate(day string) {
 	userStatesMu.Lock()
 	var bulkBody bytes.Buffer
-	today := time.Now().In(loc).Format("2006.01.02")
 	cfg := loadConfig()
 	count := 0
 
@@ -1081,7 +1084,7 @@ func saveScoresBatch() {
 			EventValues:  state.EventValues,
 			Timestamp:    time.Now().In(loc).Format(time.RFC3339),
 		}
-		bulkBody.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%s_%s"}}`, common.DailyScoresIndex(indexPrefix, today), userID, time.Now().In(loc).Format("15")))
+		bulkBody.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%s_%s"}}`, common.DailyScoresIndex(indexPrefix, day), userID, time.Now().In(loc).Format("15")))
 		bulkBody.WriteString("\n")
 		scoreJSON, _ := json.Marshal(score)
 		bulkBody.Write(scoreJSON)
