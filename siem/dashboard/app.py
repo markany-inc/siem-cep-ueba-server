@@ -164,7 +164,7 @@ async def dashboard(request: Request):
         "size": 0,
         "track_total_hits": True,
         "query": {"range": {"@timestamp": {"gte": "now/d", "time_zone": "Asia/Seoul"}}},
-        "aggs": {"byType": {"terms": {"field": "msgId", "size": 20}}}
+        "aggs": {"byType": {"terms": {"field": "msgId.keyword", "size": 20}}}
     })
     # top 10 사용자 + 점수 변화 계산
     top_users = []
@@ -286,13 +286,27 @@ async def user_detail(request: Request, user_id: str):
             if diff != 0:
                 feature_changes.append({"name": k, "diff": diff})
     config = await get_ueba_config()
+    # 어제 최종 점수 조회 (전일대비 정확한 계산용)
+    yesterday_score = await es_query(IDX_SCORES, {
+        "size": 1, "sort": [{"@timestamp": "desc"}],
+        "query": {"bool": {"must": [
+            {"term": {"userId": user_id}},
+            {"range": {"@timestamp": {"gte": "now-1d/d", "lt": "now/d", "time_zone": "Asia/Seoul"}}}
+        ]}},
+        "_source": ["riskScore"]
+    })
+    prev_day_score = 0
+    yh = yesterday_score.get("hits", {}).get("hits", [])
+    if yh:
+        prev_day_score = yh[0]["_source"].get("riskScore", 0) or 0
     return templates.TemplateResponse("user_detail.html", {
         "request": request, "user_id": user_id,
         "ueba": hits, "alerts": alerts.get("hits", {}).get("hits", []),
         "logs": logs.get("hits", {}).get("hits", []),
         "feature_changes": feature_changes,
         "tiers": config.get("tiers", {}),
-        "today": today_summary
+        "today": today_summary,
+        "prev_day_score": prev_day_score
     })
 
 @app.get("/api/user/{user_id}/hourly")

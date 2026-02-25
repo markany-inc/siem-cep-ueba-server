@@ -61,3 +61,4 @@ scripts/
 
 # Flink legacy jobs
 siem/flink/jobs/
+.kiro/

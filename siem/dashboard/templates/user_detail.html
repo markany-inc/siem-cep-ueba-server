@@ -58,7 +58,7 @@
         {% if ueba %}
         {% set latest = ueba[0]._source %}
         {% set current_score = latest.riskScore %}
-        {% set prev_score = latest.prevScore|default(0) %}
+        {% set prev_score = prev_day_score|default(0) %}
         {% set score_diff = current_score - prev_score %}
         
         <div class="mb-5 flex items-stretch gap-4">

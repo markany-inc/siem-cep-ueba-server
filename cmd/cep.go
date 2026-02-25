@@ -26,6 +26,7 @@ var cepCmd = &cobra.Command{
 		log.Printf("  Kafka: %s", cfg.Kafka.Bootstrap)
 
 		os := common.NewOSClient(cfg.OpenSearch.URL)
+		common.InitTimezone(cfg.Timezone)
 		flink := services.NewFlinkService(
 			cfg.Flink.SQLGateway,
 			cfg.Flink.RestAPI,

@@ -282,4 +282,46 @@ func (s *FlinkService) CancelRule(ruleID string) bool {
 	return s.cancelRule(ruleID)
 }
 
+// TrackJob ruleID → jobID 매핑 등록 (이미 실행 중인 Job 추적용)
+func (s *FlinkService) TrackJob(ruleID, jobID string) {
+	s.ruleJobsMu.Lock()
+	s.ruleJobs[ruleID] = jobID
+	s.ruleJobsMu.Unlock()
+}
+
+// CancelJobByID Job ID로 직접 취소
+func (s *FlinkService) CancelJobByID(jobID string) {
+	req, _ := http.NewRequest("PATCH", fmt.Sprintf("%s/jobs/%s?mode=cancel", s.FlinkURL, jobID), nil)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
+	log.Printf("[Flink] Job 취소: %s", jobID)
+}
+
+// GetRunningCEPJobs Flink에서 실행 중인 "CEP: " 접두사 Job 목록 (이름 → jobID)
+func (s *FlinkService) GetRunningCEPJobs() map[string]string {
+	result := make(map[string]string)
+	resp, err := s.client.Get(s.FlinkURL + "/jobs/overview")
+	if err != nil {
+		return result
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Jobs []struct {
+			JID   string `json:"jid"`
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"jobs"`
+	}
+	json.NewDecoder(resp.Body).Decode(&body)
+	for _, j := range body.Jobs {
+		if j.State == "RUNNING" && strings.HasPrefix(j.Name, "CEP: ") {
+			result[j.Name] = j.JID
+		}
+	}
+	return result
+}
+
 

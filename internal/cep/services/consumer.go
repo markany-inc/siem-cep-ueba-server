@@ -50,11 +50,12 @@ func processAlert(data []byte, os *common.OSClient, indexPrefix string) {
 	if err := json.Unmarshal(data, &alert); err != nil {
 		return
 	}
+	now := common.Now()
 	if alert["@timestamp"] == nil {
-		alert["@timestamp"] = time.Now().Format(time.RFC3339)
+		alert["@timestamp"] = now.Format(time.RFC3339)
 	}
-	indexName := common.DailyAlertsIndex(indexPrefix, time.Now().Format("2006.01.02"))
-	docID := fmt.Sprintf("%d", time.Now().UnixNano())
+	indexName := common.DailyAlertsIndex(indexPrefix, now.Format("2006.01.02"))
+	docID := fmt.Sprintf("%d", now.UnixNano())
 	os.Put(indexName, docID, alert)
 }
 
@@ -105,10 +106,11 @@ func sinkEvent(data []byte, os *common.OSClient, indexPrefix string) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		return
 	}
+	now := common.Now()
 	if event["@timestamp"] == nil {
-		event["@timestamp"] = time.Now().Format(time.RFC3339)
+		event["@timestamp"] = now.Format(time.RFC3339)
 	}
-	indexName := common.DailyLogsIndex(indexPrefix, time.Now().Format("2006.01.02"))
+	indexName := common.DailyLogsIndex(indexPrefix, now.Format("2006.01.02"))
 	if err := os.Index(indexName, event); err != nil {
 		log.Printf("[LogSink] 저장 실패: %v", err)
 	}

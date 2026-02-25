@@ -24,6 +24,7 @@ var uebaCmd = &cobra.Command{
 		log.Printf("  Kafka: %s", cfg.Kafka.Bootstrap)
 
 		osClient := common.NewOSClient(cfg.OpenSearch.URL)
+		common.InitTimezone(cfg.Timezone)
 
 		fieldMetaCtrl := common.NewFieldMetaController(osClient, cfg.IndexPrefix)
 		ruleCtrl := controllers.NewRuleController()

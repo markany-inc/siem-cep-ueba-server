@@ -1064,7 +1064,7 @@ func saveScoresBatch() {
 			EventValues:  state.EventValues,
 			Timestamp:    time.Now().In(loc).Format(time.RFC3339),
 		}
-		bulkBody.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%s"}}`, common.DailyScoresIndex(indexPrefix, today), userID))
+		bulkBody.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%s_%s"}}`, common.DailyScoresIndex(indexPrefix, today), userID, time.Now().In(loc).Format("15")))
 		bulkBody.WriteString("\n")
 		scoreJSON, _ := json.Marshal(score)
 		bulkBody.Write(scoreJSON)
