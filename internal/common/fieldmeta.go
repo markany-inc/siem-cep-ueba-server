@@ -1,6 +1,8 @@
 package common
 
 import (
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -139,6 +141,7 @@ func (c *FieldMetaController) AnalyzeField(ctx echo.Context) error {
 }
 
 // analyzeEvent - 로그 인덱스에서 해당 이벤트의 CEF extension 필드만 추출
+// csN/cnN 등 raw 키 대신 label 이름으로 변환하여 반환
 func (c *FieldMetaController) analyzeEvent(msgID string) []string {
 	docs, _ := c.OS.Search(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
 		"size":  50,
@@ -148,17 +151,31 @@ func (c *FieldMetaController) analyzeEvent(msgID string) []string {
 
 	fieldSet := make(map[string]bool)
 	for _, doc := range docs {
-		// cefExtensions 내부 필드 추출
-		if cef, ok := doc["cefExtensions"].(map[string]interface{}); ok {
-			for k := range cef {
-				fieldSet[k] = true
+		cef, _ := doc["cefExtensions"].(map[string]interface{})
+		if cef == nil {
+			continue
+		}
+		// label→value 쌍 수집: *Label 키에서 label 이름 추출
+		labelKeys := map[string]bool{} // cs1, cn2 등 raw value 키
+		for k, v := range cef {
+			if strings.HasSuffix(k, "Label") {
+				label, _ := v.(string)
+				if label != "" {
+					fieldSet[strings.ReplaceAll(label, " ", "")] = true
+					labelKeys[strings.TrimSuffix(k, "Label")] = true
+				}
+				// Label 키 자체는 제외
 			}
 		}
-		// attrs도 확인 (하위 호환)
-		if attrs, ok := doc["attrs"].(map[string]interface{}); ok {
-			for k := range attrs {
-				fieldSet[k] = true
+		// raw 키 중 label이 있는 것은 제외, 나머지만 추가
+		for k := range cef {
+			if strings.HasSuffix(k, "Label") {
+				continue
 			}
+			if labelKeys[k] {
+				continue // cs1 등 → label 이름으로 대체됨
+			}
+			fieldSet[k] = true
 		}
 	}
 
@@ -166,36 +183,68 @@ func (c *FieldMetaController) analyzeEvent(msgID string) []string {
 	for f := range fieldSet {
 		fields = append(fields, f)
 	}
+	sort.Strings(fields)
 	return fields
 }
 
 // analyzeFieldDetail - 필드 값 목록 수집 (select/checkbox용)
+// label 이름 필드는 실제 로그에서 매핑 키를 찾아 값을 수집
 func (c *FieldMetaController) analyzeFieldDetail(msgID, field string) map[string]interface{} {
-	// aggregation으로 값별 카운트
-	raw, _ := c.OS.SearchRaw(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
-		"size": 0,
+	// 1. 해당 msgId 문서에서 *Label 키 중 field와 일치하는 raw 키 찾기
+	rawKey := ""
+	docs, _ := c.OS.Search(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
+		"size":  20,
 		"query": map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
-		"aggs": map[string]interface{}{
-			"vals": map[string]interface{}{
-				"terms": map[string]interface{}{
-					"field": "cefExtensions." + field + ".keyword",
-					"size":  100,
-				},
-			},
-			"vals2": map[string]interface{}{
-				"terms": map[string]interface{}{
-					"field": "attrs." + field + ".keyword",
-					"size":  100,
-				},
+		"sort":  []map[string]string{{"@timestamp": "desc"}},
+	})
+	for _, doc := range docs {
+		cef, _ := doc["cefExtensions"].(map[string]interface{})
+		if cef == nil {
+			continue
+		}
+		for k, v := range cef {
+			if !strings.HasSuffix(k, "Label") {
+				continue
+			}
+			label, _ := v.(string)
+			if label != "" && strings.ReplaceAll(label, " ", "") == field {
+				rawKey = strings.TrimSuffix(k, "Label")
+				break
+			}
+		}
+		if rawKey != "" {
+			break
+		}
+	}
+
+	// 2. 직접 키 + 발견된 raw 키로 agg
+	aggs := map[string]interface{}{
+		"direct": map[string]interface{}{
+			"terms": map[string]interface{}{
+				"field": "cefExtensions." + field + ".keyword",
+				"size":  100,
 			},
 		},
+	}
+	if rawKey != "" {
+		aggs["raw"] = map[string]interface{}{
+			"terms": map[string]interface{}{
+				"field": "cefExtensions." + rawKey + ".keyword",
+				"size":  100,
+			},
+		}
+	}
+
+	raw, _ := c.OS.SearchRaw(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
+		"size":  0,
+		"query": map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
+		"aggs":  aggs,
 	})
 
-	// 값 + 카운트 수집
 	valueMap := make(map[string]int)
-	if aggs, ok := raw["aggregations"].(map[string]interface{}); ok {
-		for _, aggName := range []string{"vals", "vals2"} {
-			if agg, ok := aggs[aggName].(map[string]interface{}); ok {
+	if aggsResult, ok := raw["aggregations"].(map[string]interface{}); ok {
+		for _, aggName := range []string{"direct", "raw"} {
+			if agg, ok := aggsResult[aggName].(map[string]interface{}); ok {
 				if buckets, ok := agg["buckets"].([]interface{}); ok {
 					for _, b := range buckets {
 						if bucket, ok := b.(map[string]interface{}); ok {

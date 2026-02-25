@@ -1,4 +1,16 @@
 services:
+  logsink:
+    build:
+      context: /Safepc
+      dockerfile: siem/logsink/Dockerfile
+    image: siem-logsink:1.0.0
+    container_name: siem-logsink
+    env_file:
+      - .env
+    networks:
+      - siem-network
+    restart: unless-stopped
+
   cep:
     build:
       context: /Safepc

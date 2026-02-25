@@ -1726,7 +1726,10 @@
                 let h = `<div class="mt-2 space-y-1">
                     <div class="flex justify-between items-center">
                         <span class="text-xs text-gray-500">옵션 목록</span>
-                        <button onclick="analyzeFieldValues('${migSelectedEvent}','${field}')" class="text-xs px-2 py-1 rounded" style="background:#3b82f6;color:white">🔍 값 수집</button>
+                        <div class="flex gap-1">
+                            <button onclick="addManualOption('${field}')" class="text-xs px-2 py-1 rounded" style="background:#10b981;color:white">+ 추가</button>
+                            <button onclick="analyzeFieldValues('${migSelectedEvent}','${field}')" class="text-xs px-2 py-1 rounded" style="background:#3b82f6;color:white">🔍 값 수집</button>
+                        </div>
                     </div>
                     <div class="mig-opts-list space-y-1">`;
                 opts.forEach((o, i) => {
@@ -1871,7 +1874,10 @@
             let h = `<div class="mt-2 space-y-1">
                 <div class="flex justify-between items-center">
                     <span class="text-xs text-gray-500">옵션 목록 (${values.length}개 수집됨)</span>
-                    <button onclick="analyzeFieldValues('${evId}','${field}')" class="text-xs px-2 py-1 rounded" style="background:#3b82f6;color:white">🔍 값 수집</button>
+                    <div class="flex gap-1">
+                        <button onclick="addManualOption('${field}')" class="text-xs px-2 py-1 rounded" style="background:#10b981;color:white">+ 추가</button>
+                        <button onclick="analyzeFieldValues('${evId}','${field}')" class="text-xs px-2 py-1 rounded" style="background:#3b82f6;color:white">🔍 값 수집</button>
+                    </div>
                 </div>
                 <div class="mig-opts-list space-y-1">`;
             values.forEach((v, i) => {
@@ -1885,6 +1891,20 @@
             });
             h += '</div></div>';
             optsArea.innerHTML = h;
+        }
+
+        function addManualOption(field) {
+            const list = document.querySelector(`#opts_${field} .mig-opts-list`);
+            if (!list) return;
+            const idx = list.children.length;
+            const row = document.createElement('div');
+            row.className = 'flex gap-2 items-center';
+            row.innerHTML = `
+                <input type="text" class="form-input text-xs bg-gray-50 px-2 py-0.5 w-44 mig-opt-value" placeholder="값 입력">
+                <input type="text" class="form-input text-xs flex-1 mig-opt-label" data-idx="${idx}" value="" placeholder="한글 라벨">
+                <button onclick="this.closest('div').remove()" class="text-red-400 text-xs">✕</button>`;
+            list.appendChild(row);
+            row.querySelector('.mig-opt-value').focus();
         }
 
         // 현재 UI 상태를 migMeta에 반영
@@ -1915,7 +1935,7 @@
                 if (inputType === 'select' || inputType === 'checkbox' || inputType === 'dayOfWeek') {
                     fm.options = [];
                     div.querySelectorAll('.mig-opts-list > div').forEach(row => {
-                        const val = row.querySelector('code')?.textContent || '';
+                        const val = row.querySelector('code')?.textContent || row.querySelector('.mig-opt-value')?.value || '';
                         const lbl = row.querySelector('.mig-opt-label')?.value || '';
                         if (val) fm.options.push({value: val, label: lbl});
                     });

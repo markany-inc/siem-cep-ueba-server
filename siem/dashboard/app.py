@@ -120,6 +120,22 @@ async def push_ueba(ueba: UebaPush):
     return {"status": "ok", "clients": len(manager.active)}
 
 # OpenSearch 쿼리 헬퍼
+async def get_yesterday_scores():
+    """어제 최종 점수를 사용자별로 조회 → {userId: riskScore}"""
+    res = await es_query(IDX_SCORES, {
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": "now-1d/d", "lt": "now/d", "time_zone": "Asia/Seoul"}}},
+        "aggs": {"byUser": {"terms": {"field": "userId.keyword", "size": 500}, "aggs": {
+            "last": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": ["riskScore"]}}
+        }}}
+    })
+    result = {}
+    for b in res.get("aggregations", {}).get("byUser", {}).get("buckets", []):
+        hits = b.get("last", {}).get("hits", {}).get("hits", [])
+        if hits:
+            result[b["key"]] = hits[0]["_source"].get("riskScore", 0) or 0
+    return result
+
 async def es_query(index, body):
     async with httpx.AsyncClient() as client:
         r = await client.post(f"{OPENSEARCH_URL}/{index}/_search", json=body, timeout=10)
@@ -167,6 +183,7 @@ async def dashboard(request: Request):
         "aggs": {"byType": {"terms": {"field": "msgId.keyword", "size": 20}}}
     })
     # top 10 사용자 + 점수 변화 계산
+    yesterday = await get_yesterday_scores()
     top_users = []
     ueba_last_update = ""
     for bucket in ueba.get("aggregations", {}).get("byUser", {}).get("buckets", []):
@@ -175,8 +192,8 @@ async def dashboard(request: Request):
             current = hits[0]["_source"]
             if not ueba_last_update and current.get("@timestamp"):
                 ueba_last_update = utc_to_kst(current["@timestamp"])
-            # UEBA가 저장한 prevScore (어제 점수) 사용
-            prev_score = current.get("prevScore", current["riskScore"])
+            # 어제 최종 점수와 비교
+            prev_score = yesterday.get(current.get("userId", ""), current["riskScore"])
             current["scoreDiff"] = current["riskScore"] - prev_score
             top_users.append(current)
     # 점수 내림차순 정렬 후 상위 10명
@@ -211,13 +228,14 @@ async def users(request: Request, level: str = None):
         }
     }
     result = await es_query(IDX_SCORES, body)
+    yesterday = await get_yesterday_scores()
     users_list = []
     for bucket in result.get("aggregations", {}).get("byUser", {}).get("buckets", []):
         hits = bucket["recent"]["hits"]["hits"]
         if hits:
             user = hits[0]
             curr = user["_source"]["riskScore"]
-            prev = user["_source"].get("prevScore", curr)
+            prev = yesterday.get(user["_source"].get("userId", ""), curr)
             user["_source"]["scoreDiff"] = curr - prev
             if level:
                 if level == "HIGH" and user["_source"]["riskLevel"] not in ["HIGH"]:

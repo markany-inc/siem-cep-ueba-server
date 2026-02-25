@@ -91,16 +91,6 @@ var cepCmd = &cobra.Command{
 			os,
 		)
 
-		// Kafka log sink 시작 — 모든 이벤트를 event-logs 인덱스에 저장
-		log.Println("[CEP] Log sink 시작 중...")
-		go services.StartLogSink(
-			cfg.Kafka.Bootstrap,
-			cfg.Kafka.GroupID+"-log-sink",
-			cfg.Kafka.EventTopics,
-			cfg.IndexPrefix,
-			os,
-		)
-
 		e.Logger.Fatal(e.Start(cfg.Server.Port))
 	},
 }

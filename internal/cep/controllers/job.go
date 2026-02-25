@@ -2,8 +2,6 @@ package controllers
 
 import (
 	"log"
-	"strings"
-	"sync"
 
 	"github.com/labstack/echo/v4"
 	"github.com/markany/safepc-siem/internal/cep/services"
@@ -63,7 +61,13 @@ func (c *JobController) ReloadAll() (int, error) {
 		return 0, err
 	}
 
-	// CEP 규칙만 조회 (cep.enabled=true)
+	// 기존 CEP Job 전부 취소
+	for jid, name := range c.Flink.GetRunningCEPJobs() {
+		log.Printf("[CEP] 기존 Job 취소: %s", name)
+		c.Flink.CancelJobByID(jid)
+	}
+
+	// CEP 규칙 조회
 	docs, err := c.OS.Search(common.RulesIndex(c.IndexPrefix), map[string]interface{}{
 		"size": 100,
 		"query": map[string]interface{}{
@@ -79,16 +83,10 @@ func (c *JobController) ReloadAll() (int, error) {
 		return 0, err
 	}
 
-	// 현재 Flink에서 실행 중인 CEP Job 목록 (이름 → jobID)
-	runningJobs := c.Flink.GetRunningCEPJobs()
-
-	// 규칙별 SQL 생성 + 변경 감지
 	type ruleJob struct {
 		ruleID, name, severity, sql string
 	}
 	var toSubmit []ruleJob
-	wantedJobNames := make(map[string]bool)
-
 	for _, doc := range docs {
 		ruleID, _ := doc["_id"].(string)
 		name, _ := doc["name"].(string)
@@ -97,57 +95,22 @@ func (c *JobController) ReloadAll() (int, error) {
 		if sql == "" {
 			continue
 		}
-
-		jobName := "CEP: " + strings.ReplaceAll(name, "'", "''")
-		wantedJobNames[jobName] = true
-
-		// 이미 동일 이름으로 실행 중이면 스킵
-		if _, running := runningJobs[jobName]; running {
-			log.Printf("[CEP] 이미 실행 중 (스킵): %s", name)
-			// ruleJobs 맵에 등록
-			c.Flink.TrackJob(ruleID, runningJobs[jobName])
-			continue
-		}
-
 		toSubmit = append(toSubmit, ruleJob{ruleID, name, severity, sql})
 	}
 
-	// 더 이상 필요 없는 Job 취소
-	for jobName, jobID := range runningJobs {
-		if !wantedJobNames[jobName] {
-			log.Printf("[CEP] 불필요 Job 취소: %s (%s)", jobName, jobID)
-			c.Flink.CancelJobByID(jobID)
-		}
-	}
-
 	if len(toSubmit) == 0 {
-		log.Printf("[CEP] 새로 제출할 규칙 없음 (기존 %d개 유지)", len(wantedJobNames))
 		return 0, nil
 	}
 
-	// 병렬 제출 (최대 5개 동시)
-	sem := make(chan struct{}, 5)
-	var mu sync.Mutex
+	// 직렬 제출 (SET pipeline.name + INSERT가 세션 공유하므로 병렬 불가)
 	submitted := 0
-
-	var wg sync.WaitGroup
 	for _, r := range toSubmit {
-		wg.Add(1)
-		go func(r ruleJob) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			if _, err := c.Flink.SubmitRule(r.ruleID, r.name, r.severity, r.sql); err != nil {
-				log.Printf("[CEP] 제출 실패: %s - %v", r.name, err)
-			} else {
-				mu.Lock()
-				submitted++
-				mu.Unlock()
-			}
-		}(r)
+		if _, err := c.Flink.SubmitRule(r.ruleID, r.name, r.severity, r.sql); err != nil {
+			log.Printf("[CEP] 제출 실패: %s - %v", r.name, err)
+		} else {
+			submitted++
+		}
 	}
-	wg.Wait()
 
 	return submitted, nil
 }

@@ -30,6 +30,7 @@ func FmtNum(v interface{}) string {
 }
 
 // ── 단일 조건 → WHERE 절 조각 ──
+
 func BuildConditionClause(c map[string]interface{}) string {
 	field, _ := c["field"].(string)
 	op, _ := c["op"].(string)
@@ -41,8 +42,9 @@ func BuildConditionClause(c map[string]interface{}) string {
 	} else if field == "dayOfWeek" {
 		field = "DAYOFWEEK(proctime)"
 	} else if !isBaseField(field) {
-		// CEF extension 필드는 cefExtensions MAP에서 접근
-		field = fmt.Sprintf("cefExtensions['%s']", field)
+		// CEF extension: label 이름이면 cefExtensions MAP에서 동적 매칭
+		// csN/cnN 키는 직접 접근, 그 외는 label 역매핑 서브쿼리
+		field = cefField(field)
 	}
 
 	switch op {

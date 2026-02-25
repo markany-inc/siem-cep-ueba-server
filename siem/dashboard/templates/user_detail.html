@@ -113,17 +113,16 @@
                 {% endif %}
             </div>
             <div class="bg-white rounded-xl shadow-sm">
-                <div class="px-4 py-3 border-b border-gray-100 font-semibold text-sm">⚠️ 점수 변화 상세 <span class="text-gray-400 font-normal">({% if score_diff >= 0 %}+{% endif %}{{ "%.2f"|format(score_diff) }})</span></div>
+                <div class="px-4 py-3 border-b border-gray-100 font-semibold text-sm">⚠️ 오늘 점수 구성 <span class="text-gray-400 font-normal">{{ "%.2f"|format(current_score) }}점</span></div>
                 <div class="p-4">
-                    {% set decay_change = (latest.decayedPrev or 0) - (latest.prevScore or 0) %}
                     <div class="flex flex-wrap gap-2">
+                        {% if latest.decayedPrev %}<span class="badge badge-low">전일잔존 <span class="text-blue-600">{{ "%.2f"|format(latest.decayedPrev) }}</span></span>{% endif %}
                         {% for rule, score in ruleScores.items() %}
                         <span class="badge badge-high">{{ rule }} <span class="text-red-300">+{{ "%.2f"|format(score) }}</span></span>
                         {% endfor %}
                         {% if latest.anomalyScore %}<span class="badge badge-medium">이상행동 <span class="text-yellow-600">+{{ "%.2f"|format(latest.anomalyScore) }}</span></span>{% endif %}
-                        {% if decay_change %}<span class="badge badge-low">전일감쇠 <span class="text-blue-600">{{ "%.2f"|format(decay_change) }}</span></span>{% endif %}
                     </div>
-                    {% if not ruleScores and not latest.anomalyScore and not decay_change %}
+                    {% if not ruleScores and not latest.anomalyScore and not latest.decayedPrev %}
                     <p class="text-gray-400 text-sm">변화 없음</p>
                     {% endif %}
                 </div>

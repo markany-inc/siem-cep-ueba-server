@@ -242,19 +242,7 @@
     <script>
         // 기본값
         const defaults = {
-            weights: {
-                usb_write_connect: { name: 'USB 쓰기 연결', weight: 5, msgId: 'MESSAGE_DEVICE_USAGE' },
-                large_file_copy: { name: '대용량 파일 복사', weight: 8, msgId: 'MESSAGE_DEVICE_USAGE' },
-                blocked_media_access: { name: '차단 매체 접근', weight: 7, msgId: 'MESSAGE_DEVICE_USAGE' },
-                print_pii: { name: '개인정보 인쇄', weight: 9, msgId: 'MESSAGE_PRINT_USAGE' },
-                mass_print: { name: '다량 인쇄', weight: 7, msgId: 'MESSAGE_PRINT_USAGE' },
-                screen_capture_drm: { name: '화면 캡처 차단', weight: 6, msgId: 'MESSAGE_CAPTURE_BLOCK' },
-                cloud_upload: { name: '클라우드 업로드', weight: 7, msgId: 'MESSAGE_NETWORK_UPLOAD' },
-                messenger_file_transfer: { name: '메신저 파일 전송', weight: 6, msgId: 'MESSAGE_NETWORK_MESSENGER' },
-                harmful_site_visit: { name: '유해 사이트 방문', weight: 4, msgId: 'MESSAGE_NETWORK_BLOCKED' },
-                off_hours_access: { name: '비업무시간 접속', weight: 5, msgId: 'MESSAGE_AGENT_AUTHENTICATION' },
-                hacking_tool: { name: '해킹툴/악성 프로세스', weight: 10, msgId: 'MESSAGE_PROCESS_CONTROL' }
-            },
+            weights: {},
             multipliers: {
                 normal: { name: '일반 (Normal)', multiplier: 1.0, desc: '일반 사용자' },
                 departing: { name: '퇴사 예정 (Departing)', multiplier: 2.0, desc: '퇴사 예정자 - 위험도 2배' },
@@ -289,7 +277,11 @@
                 if (r.ok) {
                     const data = await r.json();
                     if (data && Object.keys(data).length > 0) {
-                        settings = { ...defaults, ...data };
+                        for (const key of Object.keys(defaults)) {
+                            if (data[key]) settings[key] = { ...defaults[key], ...data[key] };
+                        }
+                        if (data.weights) settings.weights = data.weights;
+                        if (data.multipliers) settings.multipliers = data.multipliers;
                     }
                 }
             } catch (e) { console.log('Using defaults'); }

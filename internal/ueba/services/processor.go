@@ -657,53 +657,19 @@ func getFieldValue(event map[string]interface{}, field string) interface{} {
 	return nil
 }
 
-// parseCEFAttrs: CEF의 cn1Label/cn1, cs1Label/cs1 등을 Label 이름 기반으로 평탄화
-// 예: cn1Label=IsMalicious cn1=1 → attrs["IsMalicious"] = "1"
-//     cs1Label=Device Type cs1=removable → attrs["Device Type"] = "removable"
-// 또한 act→action, fsize 등 기본 CEF 필드도 attrs에 복사
+// parseCEFAttrs: 변환 토픽에서는 label 이름이 이미 cefExtensions에 존재
+// 기본 CEF 필드도 attrs에 복사
 func parseCEFAttrs(event map[string]interface{}) map[string]interface{} {
 	attrs := make(map[string]interface{})
-
-	// CEF 확장 필드 소스
 	ext, _ := event["cefExtensions"].(map[string]interface{})
-	att, _ := event["attrs"].(map[string]interface{})
-
-	// Label 기반 동적 파싱 (cn1~cn4, cs1~cs6)
-	sources := []map[string]interface{}{event, ext, att}
-	prefixes := []string{"cn1", "cn2", "cn3", "cn4", "cs1", "cs2", "cs3", "cs4", "cs5", "cs6"}
-	for _, src := range sources {
-		if src == nil {
-			continue
-		}
-		for _, p := range prefixes {
-			labelKey := p + "Label"
-			if label, ok := src[labelKey].(string); ok && label != "" {
-				if val, ok := src[p]; ok {
-					attrs[label] = val
-				}
-			}
+	if ext != nil {
+		for k, v := range ext {
+			attrs[k] = v
 		}
 	}
-
-	// 기본 CEF 필드 복사 (act→action 양방향)
-	basicFields := []string{"act", "outcome", "fsize", "fname", "filePath", "fileHash",
-		"shost", "suid", "src", "smac", "suser", "dhost", "request", "proto",
-		"app", "msg", "reason", "eventType", "eventUuid", "blockType"}
-	for _, src := range sources {
-		if src == nil {
-			continue
-		}
-		for _, f := range basicFields {
-			if val, ok := src[f]; ok {
-				attrs[f] = val
-			}
-		}
-	}
-	// act → action 별칭
 	if v, ok := attrs["act"]; ok {
 		attrs["action"] = v
 	}
-
 	return attrs
 }
 

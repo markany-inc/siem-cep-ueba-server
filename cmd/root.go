@@ -23,4 +23,5 @@ func Execute() {
 func init() {
 	rootCmd.AddCommand(cepCmd)
 	rootCmd.AddCommand(uebaCmd)
+	rootCmd.AddCommand(logsinkCmd)
 }

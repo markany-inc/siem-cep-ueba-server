@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -81,4 +82,20 @@ func escapeSQLValue(s string) string {
 	s = strings.ReplaceAll(s, ";", "")
 	s = strings.ReplaceAll(s, "--", "")
 	return s
+}
+
+// cefField: 변환 토픽에서는 모든 필드가 cefExtensions MAP에 직접 존재
+func cefField(field string) string {
+	return fmt.Sprintf("cefExtensions['%s']", field)
+}
+
+func addSpaces(s string) string {
+	var result []byte
+	for i, c := range s {
+		if i > 0 && c >= 'A' && c <= 'Z' {
+			result = append(result, ' ')
+		}
+		result = append(result, byte(c))
+	}
+	return string(result)
 }

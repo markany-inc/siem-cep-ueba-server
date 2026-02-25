@@ -87,10 +87,7 @@ func (s *FlinkService) EnsureSession() error {
 	}
 
 	if !s.tablesCreated {
-		// Flink는 여러 토픽을 세미콜론(;)으로 구분하여 지정
-		flinkTopics := strings.ReplaceAll(s.EventTopics, ",", ";")
-
-		// 동적 스키마: 기본 필드 + cefExtensions MAP으로 CEF extensions 처리
+		// 변환 토픽 1개를 직접 구독
 		eventsDDL := fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS events ("+
 				"  msgId STRING,"+
@@ -110,7 +107,7 @@ func (s *FlinkService) EnsureSession() error {
 				"  'format' = 'json',"+
 				"  'json.fail-on-missing-field' = 'false',"+
 				"  'json.ignore-parse-errors' = 'true'"+
-				")", flinkTopics, s.KafkaBootstrap, s.GroupID)
+				")", s.EventTopics, s.KafkaBootstrap, s.GroupID)
 
 		if err := s.ExecSQL(eventsDDL); err != nil {
 			return err
@@ -318,7 +315,7 @@ func (s *FlinkService) GetRunningCEPJobs() map[string]string {
 	json.NewDecoder(resp.Body).Decode(&body)
 	for _, j := range body.Jobs {
 		if j.State == "RUNNING" && strings.HasPrefix(j.Name, "CEP: ") {
-			result[j.Name] = j.JID
+			result[j.JID] = j.Name
 		}
 	}
 	return result

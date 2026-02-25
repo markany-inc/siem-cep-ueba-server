@@ -21,7 +21,7 @@ func NewRuleController(os *common.OSClient, flink *services.FlinkService, indexP
 
 func (c *RuleController) List(ctx echo.Context) error {
 	docs, err := c.OS.Search(common.RulesIndex(c.IndexPrefix), map[string]interface{}{
-		"query": map[string]interface{}{"match_all": map[string]interface{}{}},
+		"query": map[string]interface{}{"term": map[string]interface{}{"cep.enabled": true}},
 		"size":  100,
 	})
 	if err != nil {
