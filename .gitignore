@@ -58,3 +58,6 @@ docs/
 siem/cep/CEP_WIKI.md
 siem/cep/HANDOVER.md
 scripts/
+
+# Flink legacy jobs
+siem/flink/jobs/
