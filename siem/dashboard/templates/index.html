@@ -216,6 +216,7 @@
                                     {% if user.riskLevel == 'HIGH' %}<span class="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">위험</span>
                                     {% elif user.riskLevel == 'MEDIUM' %}<span class="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700">주의</span>
                                     {% else %}<span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">관심</span>{% endif %}
+                                    {% if user.status == "cold_start" %}<span class="ml-1 px-1.5 py-0.5 text-[10px] rounded bg-blue-100 text-blue-600">Cold</span>{% elif user.status == "no_baseline" %}<span class="ml-1 px-1.5 py-0.5 text-[10px] rounded bg-gray-200 text-gray-500">신규</span>{% endif %}
                                 </td>
                                 <td class="px-4 py-3 text-xs font-medium {% if user.scoreDiff > 0 %}text-red-500{% elif user.scoreDiff < 0 %}text-blue-500{% else %}text-gray-400{% endif %}">
                                     {% if user.scoreDiff > 0 %}▲+{{ "%.2f"|format(user.scoreDiff) }}{% elif user.scoreDiff < 0 %}▼{{ "%.2f"|format(user.scoreDiff) }}{% else %}±0.00{% endif %}

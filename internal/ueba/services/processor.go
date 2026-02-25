@@ -138,6 +138,7 @@ type Score struct {
 	UserID       string             `json:"userId"`
 	RiskScore    float64            `json:"riskScore"`
 	RiskLevel    string             `json:"riskLevel"`
+	Status       string             `json:"status"`
 	RuleScore    float64            `json:"ruleScore"`
 	RuleScores   map[string]float64 `json:"ruleScores"`
 	AnomalyScore float64            `json:"anomalyScore"`
@@ -1169,6 +1170,7 @@ func saveScoresBatchForDate(day string) {
 			UserID:       userID,
 			RiskScore:    state.RiskScore,
 			RiskLevel:    classifyRisk(state.RiskScore, cfg),
+			Status:       getUserStatus(userID, state, cfg),
 			RuleScore:    state.RuleScore,
 			RuleScores:   state.RuleScores,
 			AnomalyScore: state.AnomalyScore,
@@ -1292,18 +1294,42 @@ func GetConfig() *Config {
 	return configCache
 }
 
+func getUserStatus(uid string, state *UserState, cfg *Config) string {
+	if state.ColdStart {
+		return "cold_start"
+	}
+	baselinesMu.RLock()
+	hasBaseline := false
+	prefix := uid + "_"
+	for k := range baselines {
+		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			hasBaseline = true
+			break
+		}
+	}
+	baselinesMu.RUnlock()
+	if !hasBaseline {
+		return "no_baseline"
+	}
+	return "active"
+}
+
 func GetAllUsers() []map[string]interface{} {
 	userStatesMu.RLock()
 	defer userStatesMu.RUnlock()
+	cfg := loadConfig()
 
 	users := make([]map[string]interface{}, 0, len(userStates))
 	for uid, state := range userStates {
 		users = append(users, map[string]interface{}{
 			"userId":       uid,
 			"riskScore":    state.RiskScore,
-			"riskLevel":    classifyRisk(state.RiskScore, loadConfig()),
+			"riskLevel":    classifyRisk(state.RiskScore, cfg),
 			"ruleScore":    state.RuleScore,
 			"anomalyScore": state.AnomalyScore,
+			"prevScore":    state.PrevScore,
+			"coldStart":    state.ColdStart,
+			"status":       getUserStatus(uid, state, cfg),
 			"lastUpdated":  state.LastUpdated,
 		})
 	}

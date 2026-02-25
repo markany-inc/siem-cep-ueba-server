@@ -111,7 +111,7 @@
                 <tbody>
                     {% for u in users %}
                     {% set user = u._source %}
-                    {% set feat = user.features or {} %}
+                    {% set feat = user.eventCounts or {} %}
                     <tr>
                         <td>
                             <a href="/user/{{ user.userId }}" class="text-blue-600 hover:text-blue-800 font-medium">{{ user.userName or user.userId }}</a>
@@ -136,12 +136,13 @@
                             {% if user.riskLevel == 'HIGH' %}<span class="badge badge-high">위험</span>
                             {% elif user.riskLevel == 'MEDIUM' %}<span class="badge badge-medium">주의</span>
                             {% else %}<span class="badge badge-low">관심</span>{% endif %}
+                            {% if user.status == "cold_start" %}<span style="margin-left:4px;padding:1px 5px;font-size:10px;border-radius:3px;background:#dbeafe;color:#2563eb">Cold</span>{% elif user.status == "no_baseline" %}<span style="margin-left:4px;padding:1px 5px;font-size:10px;border-radius:3px;background:#e5e7eb;color:#6b7280">신규</span>{% endif %}
                         </td>
-                        <td class="text-gray-600">{{ feat.loginFailCount or 0 }}</td>
-                        <td class="text-gray-600">{{ feat.usbWriteCount or 0 }}</td>
-                        <td class="text-gray-600">{{ feat.captureCount or 0 }}</td>
-                        <td class="text-gray-600">{{ feat.processBlockCount or 0 }}</td>
-                        <td class="{% if feat.malwareDetectCount %}text-red-600 font-semibold{% else %}text-gray-600{% endif %}">{{ feat.malwareDetectCount or 0 }}</td>
+                        <td class="text-gray-600">{{ feat.MESSAGE_AGENT_AUTHENTICATION or 0 }}</td>
+                        <td class="text-gray-600">{{ feat.MESSAGE_FILE_COPY or 0 }}</td>
+                        <td class="text-gray-600">{{ feat.MESSAGE_CAPTURE_BLOCK or 0 }}</td>
+                        <td class="text-gray-600">{{ feat.MESSAGE_PROCESS_CONTROL or 0 }}</td>
+                        <td class="{% if feat.MESSAGE_MALWARE %}text-red-600 font-semibold{% else %}text-gray-600{% endif %}">{{ feat.MESSAGE_MALWARE or 0 }}</td>
                         <td class="text-gray-400 font-mono">{{ user['@timestamp'] | kst }}</td>
                     </tr>
                     {% endfor %}

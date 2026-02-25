@@ -160,7 +160,7 @@ async def dashboard(request: Request):
                 "terms": {"field": "userId.keyword", "size": 500, "order": {"maxScore": "desc"}},
                 "aggs": {
                     "maxScore": {"max": {"field": "riskScore"}},
-                    "recent": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": ["userId", "riskScore", "riskLevel", "prevScore", "@timestamp"]}}
+                    "recent": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": ["userId", "riskScore", "riskLevel", "prevScore", "status", "@timestamp"]}}
                 }
             }
         }
@@ -220,7 +220,7 @@ async def users(request: Request, level: str = None):
                     "recent": {
                         "top_hits": {
                             "size": 1, "sort": [{"@timestamp": "desc"}],
-                            "_source": ["userId", "userName", "riskScore", "riskLevel", "prevScore", "eventValues", "ruleScores", "@timestamp"]
+                            "_source": ["userId", "userName", "riskScore", "riskLevel", "prevScore", "status", "eventValues", "ruleScores", "@timestamp"]
                         }
                     }
                 }
