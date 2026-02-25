@@ -73,6 +73,20 @@ func (c *OSClient) Refresh(index string) {
 	http.Post(c.BaseURL+"/"+index+"/_refresh", "application/json", nil)
 }
 
+func (c *OSClient) Delete(index, docID string) error {
+	req, _ := http.NewRequest("DELETE", c.BaseURL+"/"+index+"/_doc/"+docID, nil)
+	resp, err := Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("OpenSearch Delete failed: %s", body)
+	}
+	return nil
+}
+
 func (c *OSClient) Index(index string, doc interface{}) error {
 	data, _ := json.Marshal(doc)
 	resp, err := Client.Post(c.BaseURL+"/"+index+"/_doc", "application/json", bytes.NewReader(data))

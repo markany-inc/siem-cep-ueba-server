@@ -35,49 +35,47 @@ func BuildConditionClause(c map[string]interface{}) string {
 	op, _ := c["op"].(string)
 	val := c["value"]
 
-	// 가상 필드: hour → HOUR(proctime)
+	// 가상 필드
 	if field == "hour" || field == "time" {
 		field = "HOUR(proctime)"
+	} else if field == "dayOfWeek" {
+		field = "DAYOFWEEK(proctime)"
+	} else if !isBaseField(field) {
+		// CEF extension 필드는 cefExtensions MAP에서 접근
+		field = fmt.Sprintf("cefExtensions['%s']", field)
 	}
 
 	switch op {
 	case "eq":
 		switch v := val.(type) {
 		case bool:
-			return fmt.Sprintf("%s = %t", field, v)
+			return fmt.Sprintf("%s = '%t'", field, v)
 		case string:
 			return fmt.Sprintf("%s = '%s'", field, escapeSQLValue(v))
 		default:
-			return fmt.Sprintf("%s = %s", field, FmtNum(v))
+			return fmt.Sprintf("%s = '%s'", field, FmtNum(v))
 		}
 	case "neq":
 		if s, ok := val.(string); ok {
 			return fmt.Sprintf("%s != '%s'", field, escapeSQLValue(s))
 		}
-		return fmt.Sprintf("%s != %s", field, FmtNum(val))
+		return fmt.Sprintf("%s != '%s'", field, FmtNum(val))
 	case "gt":
-		return fmt.Sprintf("%s > %s", field, FmtNum(val))
+		return fmt.Sprintf("CAST(%s AS DOUBLE) > %s", field, FmtNum(val))
 	case "gte":
-		return fmt.Sprintf("%s >= %s", field, FmtNum(val))
+		return fmt.Sprintf("CAST(%s AS DOUBLE) >= %s", field, FmtNum(val))
 	case "lt":
-		return fmt.Sprintf("%s < %s", field, FmtNum(val))
+		return fmt.Sprintf("CAST(%s AS DOUBLE) < %s", field, FmtNum(val))
 	case "lte":
-		return fmt.Sprintf("%s <= %s", field, FmtNum(val))
+		return fmt.Sprintf("CAST(%s AS DOUBLE) <= %s", field, FmtNum(val))
 	case "in":
 		if arr, ok := val.([]interface{}); ok {
-			if field == "dayOfWeek" {
-				parts := make([]string, len(arr))
-				for i, v := range arr {
-					parts[i] = FmtNum(v)
-				}
-				return fmt.Sprintf("DAYOFWEEK(proctime) IN (%s)", strings.Join(parts, ","))
-			}
 			parts := make([]string, len(arr))
 			for i, v := range arr {
 				if s, ok := v.(string); ok {
 					parts[i] = fmt.Sprintf("'%s'", escapeSQLValue(s))
 				} else {
-					parts[i] = FmtNum(v)
+					parts[i] = fmt.Sprintf("'%s'", FmtNum(v))
 				}
 			}
 			return fmt.Sprintf("%s IN (%s)", field, strings.Join(parts, ","))
@@ -87,15 +85,23 @@ func BuildConditionClause(c map[string]interface{}) string {
 	case "regex":
 		return fmt.Sprintf("REGEXP(%s, '%v')", field, escapeSQLValue(fmt.Sprintf("%v", val)))
 	case "time_range":
-		// 비업무시간 등 시간대 필터 (KST 기준)
 		start := toInt(c["start"])
 		end := toInt(c["end"])
-		if start > end { // 야간: 22시~6시
+		if start > end {
 			return fmt.Sprintf("(HOUR(proctime) >= %d OR HOUR(proctime) < %d)", start, end)
 		}
 		return fmt.Sprintf("(HOUR(proctime) >= %d AND HOUR(proctime) < %d)", start, end)
 	}
 	return ""
+}
+
+// 기본 필드 (테이블에 직접 정의된 필드)
+func isBaseField(field string) bool {
+	base := map[string]bool{
+		"msgId": true, "hostname": true, "userId": true,
+		"userName": true, "userIp": true, "eventType": true,
+	}
+	return base[field]
 }
 
 // ── match 객체 → WHERE 절 전체 ──
@@ -152,13 +158,16 @@ func ParseWindow(window interface{}) string {
 }
 
 // ── 통합 규칙 JSON → Flink SQL SELECT 쿼리 ──
-// 출력 컬럼: userId, hostname, userIp, cnt (고정)
 func BuildSQLFromRule(rule map[string]interface{}) string {
 	patterns := toSlice(rule["patterns"])
 	logic := strings.ToUpper(toString(rule["logic"], "AND"))
 	within := rule["within"]
 	byFields := toStringSlice(rule["by"], []string{"userId"})
 	aggregate, _ := rule["aggregate"].(map[string]interface{})
+
+	// 출력 필드: by 필드 기반 (기본: userId)
+	selectFields := strings.Join(byFields, ", ")
+	groupFields := strings.Join(byFields, ", ")
 
 	// ── 통합 JSON: events[] → patterns[].match 변환 ──
 	if len(patterns) == 0 {
@@ -243,10 +252,10 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 			interval := ParseWindow(getNestedVal(aggregate, "within", "1h"))
 			minCount := getNestedInt(aggregate, "count", "min", 1)
 			return fmt.Sprintf(
-				"SELECT userId, hostname, userIp, COUNT(*) as cnt "+
+				"SELECT %s, COUNT(*) as cnt "+
 					"FROM events WHERE %s "+
-					"GROUP BY TUMBLE(proctime, %s), userId, hostname, userIp "+
-					"HAVING COUNT(*) >= %d", where, interval, minCount)
+					"GROUP BY TUMBLE(proctime, %s), %s "+
+					"HAVING COUNT(*) >= %d", selectFields, where, interval, groupFields, minCount)
 		}
 
 		// quantifier 반복 횟수
@@ -256,14 +265,14 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 				interval = ParseWindow("1h")
 			}
 			return fmt.Sprintf(
-				"SELECT userId, hostname, userIp, COUNT(*) as cnt "+
+				"SELECT %s, COUNT(*) as cnt "+
 					"FROM events WHERE %s "+
-					"GROUP BY TUMBLE(proctime, %s), userId, hostname, userIp "+
-					"HAVING COUNT(*) >= %d", where, interval, minQ)
+					"GROUP BY TUMBLE(proctime, %s), %s "+
+					"HAVING COUNT(*) >= %d", selectFields, where, interval, groupFields, minQ)
 		}
 
 		// 단순 필터
-		return fmt.Sprintf("SELECT userId, hostname, userIp, 1 as cnt FROM events WHERE %s", where)
+		return fmt.Sprintf("SELECT %s, 1 as cnt FROM events WHERE %s", selectFields, where)
 	}
 
 	// ═══════ 순차 패턴 (MATCH_RECOGNIZE) ═══════
@@ -308,22 +317,19 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 		if within == nil {
 			interval = ParseWindow("5m")
 		}
-		firstPid := fmt.Sprintf("P%d", toInt(ordered[0]["order"]))
 
 		return fmt.Sprintf(
 			"SELECT * FROM events\nMATCH_RECOGNIZE (\n"+
 				"  PARTITION BY %s\n"+
 				"  ORDER BY proctime\n"+
 				"  MEASURES\n"+
-				"    LAST(%s.hostname) AS hostname,\n"+
-				"    LAST(%s.userIp) AS userIp,\n"+
 				"    COUNT(*) AS cnt\n"+
 				"  ONE ROW PER MATCH\n"+
 				"  AFTER MATCH SKIP PAST LAST ROW\n"+
 				"  PATTERN (%s) WITHIN %s\n"+
 				"  DEFINE\n"+
 				"    %s\n)",
-			partitionBy, firstPid, firstPid,
+			partitionBy,
 			strings.Join(patternParts, " "), interval,
 			strings.Join(defineClauses, ", "))
 	}
@@ -337,8 +343,8 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 
 	// OR: 어느 하나라도 매칭
 	if logic == "OR" {
-		return fmt.Sprintf("SELECT userId, hostname, userIp, 1 as cnt FROM events WHERE %s",
-			strings.Join(whereParts, " OR "))
+		return fmt.Sprintf("SELECT %s, 1 as cnt FROM events WHERE %s",
+			selectFields, strings.Join(whereParts, " OR "))
 	}
 
 	// AND: 윈도우 내 모든 패턴 존재
@@ -346,7 +352,6 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 	if within == nil {
 		interval = ParseWindow("30m")
 	}
-	partition := strings.Join(byFields, ", ")
 
 	var caseSelects, havingParts []string
 	for i, p := range patterns {
@@ -357,13 +362,13 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 	}
 
 	return fmt.Sprintf(
-		"SELECT userId, hostname, userIp, %s, COUNT(*) as cnt "+
+		"SELECT %s, %s, COUNT(*) as cnt "+
 			"FROM events WHERE %s "+
-			"GROUP BY TUMBLE(proctime, %s), %s, hostname, userIp "+
+			"GROUP BY TUMBLE(proctime, %s), %s "+
 			"HAVING %s",
-		strings.Join(caseSelects, ", "),
+		selectFields, strings.Join(caseSelects, ", "),
 		strings.Join(whereParts, " OR "),
-		interval, partition,
+		interval, groupFields,
 		strings.Join(havingParts, " AND "))
 }
 

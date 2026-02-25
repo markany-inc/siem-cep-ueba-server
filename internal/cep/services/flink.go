@@ -90,43 +90,16 @@ func (s *FlinkService) EnsureSession() error {
 		// Flink는 여러 토픽을 세미콜론(;)으로 구분하여 지정
 		flinkTopics := strings.ReplaceAll(s.EventTopics, ",", ";")
 
+		// 동적 스키마: 기본 필드 + cefExtensions MAP으로 CEF extensions 처리
 		eventsDDL := fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS events ("+
-				"  msgId STRING, hostname STRING, eventName STRING, signatureId STRING,"+
-				"  cefExtensions ROW<"+
-				"    suid STRING, suser STRING, src STRING, smac STRING, shost STRING, rt STRING,"+
-				"    aid STRING, customerExternalID STRING,"+
-				"    act STRING, outcome STRING, reason STRING, msg STRING,"+
-				"    fname STRING, filePath STRING, fsize STRING, fileHash STRING,"+
-				"    proto STRING, dhost STRING, request STRING, app STRING,"+
-				"    cs1 STRING, cs1Label STRING, cs2 STRING, cs2Label STRING,"+
-				"    cs3 STRING, cs3Label STRING, cs4 STRING, cs4Label STRING,"+
-				"    cs5 STRING, cs5Label STRING, cs6 STRING, cs6Label STRING,"+
-				"    cn1 STRING, cn1Label STRING, cn2 STRING, cn2Label STRING,"+
-				"    cn3 STRING, cn3Label STRING, cn4 STRING, cn4Label STRING,"+
-				"    eventUuid STRING, eventType STRING, hasEventFile STRING,"+
-				"    description STRING, deviceUuid STRING, userUuid STRING,"+
-				"    adminUnblock STRING, blockType STRING, changeType STRING,"+
-				"    deviceInfo STRING, deviceType STRING, systemUuid STRING,"+
-				"    captureFileCount STRING, captureFiles STRING,"+
-				"    unlockActorType STRING, releasedBlockType STRING"+
-				"  >,"+
-				"  userId AS cefExtensions.suid, userIp AS cefExtensions.src,"+
-				"  action AS cefExtensions.act, outcome AS cefExtensions.outcome,"+
-				"  cs1 AS cefExtensions.cs1, cs1Label AS cefExtensions.cs1Label,"+
-				"  cs2 AS cefExtensions.cs2, cs2Label AS cefExtensions.cs2Label,"+
-				"  cs3 AS cefExtensions.cs3, cs3Label AS cefExtensions.cs3Label,"+
-				"  cs4 AS cefExtensions.cs4, cs4Label AS cefExtensions.cs4Label,"+
-				"  cs5 AS cefExtensions.cs5, cs5Label AS cefExtensions.cs5Label,"+
-				"  cs6 AS cefExtensions.cs6, cs6Label AS cefExtensions.cs6Label,"+
-				"  cn1 AS cefExtensions.cn1, cn1Label AS cefExtensions.cn1Label,"+
-				"  cn2 AS cefExtensions.cn2, cn2Label AS cefExtensions.cn2Label,"+
-				"  cn3 AS cefExtensions.cn3, cn3Label AS cefExtensions.cn3Label,"+
-				"  cn4 AS cefExtensions.cn4, cn4Label AS cefExtensions.cn4Label,"+
-				"  fname AS cefExtensions.fname, filePath AS cefExtensions.filePath,"+
-				"  fsize AS cefExtensions.fsize, fileHash AS cefExtensions.fileHash,"+
-				"  proto AS cefExtensions.proto, dhost AS cefExtensions.dhost,"+
-				"  request AS cefExtensions.request, app AS cefExtensions.app,"+
+				"  msgId STRING,"+
+				"  hostname STRING,"+
+				"  appName STRING,"+
+				"  cefExtensions MAP<STRING, STRING>,"+
+				"  userId AS cefExtensions['suid'],"+
+				"  userName AS cefExtensions['suser'],"+
+				"  userIp AS cefExtensions['src'],"+
 				"  proctime AS PROCTIME()"+
 				") WITH ("+
 				"  'connector' = 'kafka',"+
@@ -212,9 +185,8 @@ func (s *FlinkService) SubmitRule(ruleID, ruleName, severity, sql string) (strin
 
 	s.cancelRule(ruleID)
 
-	before, _ := s.GetRunningJobIDs()
-
 	safeName := strings.ReplaceAll(ruleName, "'", "''")
+	jobName := "CEP: " + safeName
 	flat := strings.ReplaceAll(sql, "\n", " ")
 
 	var insertSQL string
@@ -228,28 +200,48 @@ func (s *FlinkService) SubmitRule(ruleID, ruleName, severity, sql string) (strin
 			ruleID, safeName, severity, flat)
 	}
 
-	s.ExecSQL(fmt.Sprintf("SET 'pipeline.name' = 'CEP: %s'", safeName))
+	s.ExecSQL(fmt.Sprintf("SET 'pipeline.name' = '%s'", jobName))
 
 	if err := s.ExecSQL(insertSQL); err != nil {
 		return "", err
 	}
 
+	// Job 이름으로 찾기
 	for i := 0; i < 6; i++ {
 		time.Sleep(500 * time.Millisecond)
-		after, _ := s.GetRunningJobIDs()
-		for jid := range after {
-			if !before[jid] {
-				s.ruleJobsMu.Lock()
-				s.ruleJobs[ruleID] = jid
-				s.ruleJobsMu.Unlock()
-				log.Printf("[CEP] 규칙 제출: %s → %s", ruleName, jid)
-				return jid, nil
-			}
+		if jid := s.findJobByName(jobName); jid != "" {
+			s.ruleJobsMu.Lock()
+			s.ruleJobs[ruleID] = jid
+			s.ruleJobsMu.Unlock()
+			log.Printf("[CEP] 규칙 제출: %s → %s", ruleName, jid)
+			return jid, nil
 		}
 	}
 
 	log.Printf("[CEP] 규칙 제출됨 (Job ID 미확인): %s", ruleName)
 	return "", nil
+}
+
+func (s *FlinkService) findJobByName(name string) string {
+	resp, err := s.client.Get(s.FlinkURL + "/jobs/overview")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Jobs []struct {
+			JID   string `json:"jid"`
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"jobs"`
+	}
+	json.NewDecoder(resp.Body).Decode(&body)
+	for _, j := range body.Jobs {
+		if j.State == "RUNNING" && j.Name == name {
+			return j.JID
+		}
+	}
+	return ""
 }
 
 func (s *FlinkService) cancelRule(ruleID string) bool {

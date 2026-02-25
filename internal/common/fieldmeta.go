@@ -82,7 +82,7 @@ func (c *FieldMetaController) analyzeByDays(ctx echo.Context, days int) error {
 		},
 		"aggs": map[string]interface{}{
 			"msgIds": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "msgId", "size": 100},
+				"terms": map[string]interface{}{"field": "msgId.keyword", "size": 100},
 			},
 		},
 	}
@@ -142,21 +142,21 @@ func (c *FieldMetaController) AnalyzeField(ctx echo.Context) error {
 func (c *FieldMetaController) analyzeEvent(msgID string) []string {
 	docs, _ := c.OS.Search(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
 		"size":  50,
-		"query": map[string]interface{}{"term": map[string]string{"msgId": msgID}},
+		"query": map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
 		"sort":  []map[string]string{{"@timestamp": "desc"}},
 	})
 
 	fieldSet := make(map[string]bool)
 	for _, doc := range docs {
-		// attrs (CEF extensions) 내부 필드만 추출
-		if attrs, ok := doc["attrs"].(map[string]interface{}); ok {
-			for k := range attrs {
+		// cefExtensions 내부 필드 추출
+		if cef, ok := doc["cefExtensions"].(map[string]interface{}); ok {
+			for k := range cef {
 				fieldSet[k] = true
 			}
 		}
-		// ext도 CEF extensions
-		if ext, ok := doc["ext"].(map[string]interface{}); ok {
-			for k := range ext {
+		// attrs도 확인 (하위 호환)
+		if attrs, ok := doc["attrs"].(map[string]interface{}); ok {
+			for k := range attrs {
 				fieldSet[k] = true
 			}
 		}
@@ -174,17 +174,17 @@ func (c *FieldMetaController) analyzeFieldDetail(msgID, field string) map[string
 	// aggregation으로 값별 카운트
 	raw, _ := c.OS.SearchRaw(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
 		"size": 0,
-		"query": map[string]interface{}{"term": map[string]string{"msgId": msgID}},
+		"query": map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
 		"aggs": map[string]interface{}{
 			"vals": map[string]interface{}{
 				"terms": map[string]interface{}{
-					"field": "attrs." + field + ".keyword",
+					"field": "cefExtensions." + field + ".keyword",
 					"size":  100,
 				},
 			},
 			"vals2": map[string]interface{}{
 				"terms": map[string]interface{}{
-					"field": "ext." + field + ".keyword",
+					"field": "attrs." + field + ".keyword",
 					"size":  100,
 				},
 			},

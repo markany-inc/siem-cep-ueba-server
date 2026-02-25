@@ -112,3 +112,12 @@ func (c *RuleController) BuildSQL(ctx echo.Context) error {
 	sql := services.BuildSQLFromRule(rule)
 	return ctx.JSON(200, map[string]string{"sql": sql})
 }
+
+func (c *RuleController) Delete(ctx echo.Context) error {
+	ruleID := ctx.Param("id")
+	c.Flink.CancelRule(ruleID)
+	if err := c.OS.Delete(common.RulesIndex(c.IndexPrefix), ruleID); err != nil {
+		return ctx.JSON(500, map[string]string{"error": err.Error()})
+	}
+	return ctx.JSON(200, map[string]string{"status": "ok"})
+}

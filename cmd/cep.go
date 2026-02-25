@@ -55,6 +55,7 @@ var cepCmd = &cobra.Command{
 		e.GET("/api/rules", ruleCtrl.List)
 		e.POST("/api/rules", ruleCtrl.Create)
 		e.PUT("/api/rules/:id", ruleCtrl.Update)
+		e.DELETE("/api/rules/:id", ruleCtrl.Delete)
 		e.POST("/api/build-sql", ruleCtrl.BuildSQL)
 
 		// CEP Job API

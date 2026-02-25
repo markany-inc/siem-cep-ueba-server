@@ -1,0 +1,6 @@
+.git
+siem/*/data
+siem/flink
+siem/opensearch
+siem/dashboard
+*.md

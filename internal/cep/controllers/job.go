@@ -92,9 +92,10 @@ func (c *JobController) ReloadAll() (int, error) {
 
 func (c *JobController) Status(ctx echo.Context) error {
 	jobs, _ := c.Flink.GetRunningJobIDs()
-	tracked, _ := c.Flink.GetTrackedJobs()
+	trackedCount, trackedJobs := c.Flink.GetTrackedJobs()
 	return ctx.JSON(200, map[string]interface{}{
-		"running": len(jobs),
-		"tracked": tracked,
+		"running":     len(jobs),
+		"tracked":     trackedCount,
+		"trackedJobs": trackedJobs,
 	})
 }
