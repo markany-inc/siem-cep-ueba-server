@@ -1369,6 +1369,8 @@ func CreateRule(data map[string]interface{}) (string, error) {
 	if errs := validateRule(data); len(errs) > 0 {
 		return "", fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
+	delete(data, "_id")
+	delete(data, "id")
 	data["createdAt"] = time.Now().In(loc).Format(time.RFC3339)
 	result, err := esRequest("POST", fmt.Sprintf("/%s/_doc", common.RulesIndex(indexPrefix)), data)
 	if err != nil {
@@ -1380,6 +1382,8 @@ func CreateRule(data map[string]interface{}) (string, error) {
 }
 
 func UpdateRule(id string, data map[string]interface{}) error {
+	delete(data, "_id")
+	delete(data, "id")
 	_, err := esRequest("PUT", fmt.Sprintf("/%s/_doc/%s", common.RulesIndex(indexPrefix), id), data)
 	if err != nil {
 		return err
