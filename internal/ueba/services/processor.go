@@ -210,9 +210,101 @@ func ensureBaselinesFresh() {
 	log.Println("[INIT] Baseline 갱신 완료")
 }
 
+// initUsersFromPrevScores: 어제까지 점수가 있는 모든 유저를 decay 적용하여 인메모리에 초기화
+// 오늘 이벤트가 없어도 대시보드에 decay된 점수가 표시됨
+func initUsersFromPrevScores() {
+	today := time.Now().In(loc).Format("2006-01-02")
+	query := map[string]interface{}{
+		"size": 0,
+		"query": map[string]interface{}{
+			"range": map[string]interface{}{
+				"@timestamp": map[string]interface{}{"lt": today, "time_zone": "Asia/Seoul"},
+			},
+		},
+		"aggs": map[string]interface{}{
+			"users": map[string]interface{}{
+				"terms": map[string]interface{}{"field": "userId.keyword", "size": maxUsersAggSize},
+				"aggs": map[string]interface{}{
+					"latest": map[string]interface{}{
+						"top_hits": map[string]interface{}{
+							"size":    1,
+							"sort":    []map[string]interface{}{{"@timestamp": "desc"}},
+							"_source": []string{"riskScore", "@timestamp"},
+						},
+					},
+				},
+			},
+		},
+	}
+	body, _ := json.Marshal(query)
+	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.ScoresIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Aggregations struct {
+			Users struct {
+				Buckets []struct {
+					Key    string `json:"key"`
+					Latest struct {
+						Hits struct {
+							Hits []struct {
+								Source struct {
+									RiskScore float64 `json:"riskScore"`
+									Timestamp string  `json:"@timestamp"`
+								} `json:"_source"`
+							} `json:"hits"`
+						} `json:"hits"`
+					} `json:"latest"`
+				} `json:"buckets"`
+			} `json:"users"`
+		} `json:"aggregations"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	now := time.Now().In(loc)
+	userStatesMu.Lock()
+	for _, bucket := range result.Aggregations.Users.Buckets {
+		uid := bucket.Key
+		if _, exists := userStates[uid]; exists {
+			continue
+		}
+		if len(bucket.Latest.Hits.Hits) == 0 {
+			continue
+		}
+		hit := bucket.Latest.Hits.Hits[0].Source
+		if hit.RiskScore <= 0 {
+			continue
+		}
+		days := 1
+		if t, err := time.Parse(time.RFC3339, hit.Timestamp); err == nil {
+			days = int(now.Sub(t).Hours()/24) + 1
+			if days < 1 {
+				days = 1
+			}
+		}
+		userStates[uid] = &UserState{
+			PrevScore:    hit.RiskScore,
+			DaysSinceLast: days,
+			EventCounts:  make(map[string]int),
+			EventValues:  make(map[string]float64),
+			RuleScores:   make(map[string]float64),
+			LastUpdated:  now,
+			Dirty:        true,
+		}
+	}
+	userStatesMu.Unlock()
+	log.Printf("[INIT] %d명 이전 점수 유저 초기화", len(result.Aggregations.Users.Buckets))
+}
+
 func recoverTodayState() {
 	today := time.Now().In(loc).Format("2006-01-02")
 	log.Printf("[INIT] 오늘(%s) 로그에서 상태 복구 중...", today)
+
+	// 1) 어제까지 점수가 있는 유저를 decay 적용하여 초기화
+	initUsersFromPrevScores()
 
 	rules := loadRules()
 	batchSize := recoverBatch
