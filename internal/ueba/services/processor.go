@@ -421,6 +421,9 @@ func recoverTodayState() {
 	userStatesMu.Unlock()
 
 	log.Printf("[INIT] %d명 유저, %d건 이벤트 복구 완료", len(userStates), totalProcessed)
+
+	// 복구된 상태를 즉시 scores에 저장 (대시보드 표시용)
+	saveScoresBatch()
 }
 
 func loadAllBaselines() {
