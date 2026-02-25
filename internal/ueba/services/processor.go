@@ -165,9 +165,49 @@ func initialize() {
 	loadConfig()
 	loadRules()
 	loadAllBaselines()
+	ensureBaselinesFresh()
 	currentDate = time.Now().In(loc).Format("2006-01-02")
 	recoverTodayState()
 	log.Println("[INIT] 초기화 완료")
+}
+
+// ensureBaselinesFresh: baseline이 오늘 자정 기준(어제까지 데이터)으로 최신인지 확인
+// settings 인덱스에 baseline_updated_at을 기록하여 판단
+func ensureBaselinesFresh() {
+	today := time.Now().In(loc).Format("2006-01-02")
+
+	resp, err := httpClient.Get(fmt.Sprintf("%s/%s/_doc/baseline_meta", opensearchURL, common.SettingsIndex(indexPrefix)))
+	if err == nil && resp.StatusCode == 200 {
+		var result struct {
+			Source struct {
+				UpdatedAt string `json:"updated_at"`
+			} `json:"_source"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if result.Source.UpdatedAt == today {
+			log.Println("[INIT] Baseline 최신 (오늘 자정 갱신 완료)")
+			return
+		}
+		log.Printf("[INIT] Baseline 갱신 필요 (마지막: %s, 오늘: %s)", result.Source.UpdatedAt, today)
+	} else {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		log.Println("[INIT] Baseline 메타 없음, 갱신 실행")
+	}
+
+	updateBaselines()
+	// 갱신 완료 시점 기록
+	meta, _ := json.Marshal(map[string]string{"updated_at": today})
+	req, _ := http.NewRequest("PUT",
+		fmt.Sprintf("%s/%s/_doc/baseline_meta", opensearchURL, common.SettingsIndex(indexPrefix)),
+		bytes.NewReader(meta))
+	req.Header.Set("Content-Type", "application/json")
+	if r, err := httpClient.Do(req); err == nil {
+		r.Body.Close()
+	}
+	log.Println("[INIT] Baseline 갱신 완료")
 }
 
 func recoverTodayState() {
@@ -800,7 +840,18 @@ func checkDateRollover() {
 	}
 	userStatesMu.Unlock()
 
-	go updateBaselines()
+	go func() {
+		updateBaselines()
+		today := time.Now().In(loc).Format("2006-01-02")
+		meta, _ := json.Marshal(map[string]string{"updated_at": today})
+		req, _ := http.NewRequest("PUT",
+			fmt.Sprintf("%s/%s/_doc/baseline_meta", opensearchURL, common.SettingsIndex(indexPrefix)),
+			bytes.NewReader(meta))
+		req.Header.Set("Content-Type", "application/json")
+		if r, err := httpClient.Do(req); err == nil {
+			r.Body.Close()
+		}
+	}()
 }
 
 // ===== 설정/규칙 로드 =====
