@@ -1,0 +1,37 @@
+services:
+  cep:
+    build:
+      context: /Safepc
+      dockerfile: siem/cep/Dockerfile
+    image: siem-cep:1.0.0
+    container_name: siem-cep
+    env_file:
+      - .env
+    ports:
+      - "48084:48084"
+    volumes:
+      - ./cep/data:/app/data
+    networks:
+      - siem-network
+    restart: unless-stopped
+
+  ueba:
+    build:
+      context: /Safepc
+      dockerfile: siem/ueba/Dockerfile
+    image: siem-ueba:1.0.0
+    container_name: siem-ueba
+    env_file:
+      - .env
+    ports:
+      - "48082:48082"
+    volumes:
+      - ./ueba/data:/app/data
+    networks:
+      - siem-network
+    restart: unless-stopped
+
+networks:
+  siem-network:
+    name: opensearch_siem-network
+    external: true

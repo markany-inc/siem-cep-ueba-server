@@ -1,0 +1,21 @@
+services:
+  dashboard:
+    build: .
+    container_name: siem-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - OPENSEARCH_URL=http://siem-opensearch:9200
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+    volumes:
+      - ./templates:/app/templates:ro
+      - ./app.py:/app/app.py:ro
+      - ./rules.json:/app/rules.json:ro
+    networks:
+      - opensearch_siem-network
+    restart: unless-stopped
+
+networks:
+  opensearch_siem-network:
+    external: true

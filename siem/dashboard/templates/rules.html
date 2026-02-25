@@ -1,0 +1,1997 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEP Rules - SafePC SIEM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .nav-menu { position: relative; }
+        .nav-item { padding: 8px 16px; font-size: 14px; font-weight: 500; border-radius: 8px; transition: all 0.2s; cursor: pointer; color: white; }
+        .nav-item:hover { background: white; color: #1e293b; }
+        .nav-item.active { background: #3b82f6; color: white; }
+        .dropdown { position: absolute; top: 100%; left: 0; margin-top: 4px; background: white; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid #e5e7eb; padding: 4px 0; min-width: 160px; opacity: 0; visibility: hidden; transition: all 0.2s; }
+        .nav-menu:hover .dropdown { opacity: 1; visibility: visible; }
+        .dropdown a { display: block; padding: 8px 16px; font-size: 14px; color: #374151; }
+        .dropdown a:hover { background: #f3f4f6; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th { font-size: 13px; font-weight: 600; color: #374151; background: #f9fafb; border-bottom: 2px solid #e5e7eb; padding: 12px 16px; text-align: left; }
+        td { font-size: 13px; padding: 12px 16px; border-bottom: 1px solid #f3f4f6; }
+        tr:hover { background: #f9fafb; }
+        tr.editable { cursor: pointer; }
+        tr.editable:hover { background: #eff6ff; }
+        .badge { padding: 4px 10px; font-size: 12px; font-weight: 500; border-radius: 9999px; }
+        .badge-critical { background: #fef2f2; color: #b91c1c; }
+        .badge-high { background: #fff7ed; color: #c2410c; }
+        .badge-medium { background: #fffbeb; color: #b45309; }
+        .badge-low { background: #f0fdf4; color: #15803d; }
+        .tab { padding: 10px 20px; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; color: #6b7280; }
+        .tab:hover { color: #374151; }
+        .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: white; border-radius: 12px; padding: 24px; width: 700px; max-width: 90%; max-height: 90vh; overflow-y: auto; }
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 6px; }
+        .form-input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; }
+        .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+        .form-input[readonly] { background: #f9fafb; }
+        .form-hint { font-size: 11px; color: #6b7280; margin-top: 4px; }
+        .form-select { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background: white; }
+        .btn { padding: 10px 20px; font-size: 14px; font-weight: 500; border-radius: 8px; cursor: pointer; transition: all 0.2s; border: none; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-secondary { background: #f3f4f6; color: #374151; }
+        .btn-secondary:hover { background: #e5e7eb; }
+        /* UML Builder */
+        .palette-node { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: white; border: 1px solid #e5e7eb; border-radius: 8px; cursor: grab; font-size: 13px; font-weight: 500; }
+        .palette-node:hover { border-color: #3b82f6; background: #eff6ff; }
+        .canvas-node { position: absolute; min-width: 160px; background: white; border: 2px solid #e5e7eb; border-radius: 10px; cursor: move; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .canvas-node:hover { border-color: #3b82f6; }
+        .canvas-node.selected { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.2); }
+        .canvas-node .node-header { padding: 8px 12px; border-bottom: 1px solid #f3f4f6; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+        .canvas-node .node-body { padding: 10px 12px; font-size: 12px; color: #6b7280; }
+        .canvas-node.event { border-color: #10b981; }
+        .canvas-node.event .node-header { background: #ecfdf5; color: #059669; }
+        .canvas-node.condition { border-color: #f59e0b; border-radius: 10px; transform: rotate(0deg); }
+        .canvas-node.condition .node-header { background: #fffbeb; color: #b45309; }
+        .canvas-node.window { border-color: #8b5cf6; }
+        .canvas-node.window .node-header { background: #f5f3ff; color: #7c3aed; }
+        .canvas-node.action { border-color: #ef4444; }
+        .canvas-node.action .node-header { background: #fef2f2; color: #dc2626; }
+        .node-port { position: absolute; width: 16px; height: 16px; background: #3b82f6; border: 2px solid white; border-radius: 50%; cursor: crosshair; z-index: 10; }
+        .node-port.in { top: 50%; left: -8px; transform: translateY(-50%); }
+        .node-port.out { top: 50%; right: -8px; transform: translateY(-50%); }
+        .node-delete { position: absolute; top: -8px; right: -8px; width: 20px; height: 20px; background: #ef4444; color: white; border-radius: 50%; font-size: 12px; cursor: pointer; display: none; align-items: center; justify-content: center; }
+        .canvas-node:hover .node-delete { display: flex; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <nav class="bg-gradient-to-r from-slate-900 to-slate-800 text-white sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold tracking-tight">SafePC <span class="text-blue-400">SIEM</span></a>
+            <div class="flex items-center gap-2">
+                <a href="/" class="nav-item">Dashboard</a>
+                <div class="nav-menu">
+                    <span class="nav-item">Monitoring ▾</span>
+                    <div class="dropdown">
+                        <a href="/alerts">Alert History</a>
+                        <a href="/logs">Event Logs</a>
+                    </div>
+                </div>
+                <a href="/users" class="nav-item">User Risk</a>
+                <a href="/rules" class="nav-item active">CEP Rules</a>
+                <a href="/settings" class="nav-item">UEBA Settings</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-6 py-6">
+        <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-4">
+                <h1 class="text-2xl font-bold text-gray-900">CEP 탐지 규칙</h1>
+                <span class="text-sm text-gray-500">클릭하여 규칙 수정 가능</span>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="openMigration()" class="btn btn-primary flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    마이그레이션
+                </button>
+                <button onclick="openRuleBuilder()" class="btn btn-primary flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    규칙 추가
+                </button>
+            </div>
+        </div>
+
+        <!-- CEP Rules Panel -->
+        <div id="cep-panel" class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                <h3 class="font-semibold text-gray-800">실시간 이벤트 탐지 규칙 <span id="cepCount" class="text-xs text-gray-400"></span> <span class="text-xs text-blue-500 ml-2">클릭하여 수정</span></h3>
+            </div>
+            <table id="cepTable">
+                <thead>
+                    <tr>
+                        <th style="width:35%">규칙명</th>
+                        <th style="width:80px">활성화</th>
+                        <th style="width:80px">등급</th>
+                        <th style="width:100px">카테고리</th>
+                        <th>탐지 조건</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- 마이그레이션 모달 -->
+    <div id="migrationModal" class="modal">
+        <div class="modal-content" style="width:98vw;max-width:1600px;height:95vh;display:flex;flex-direction:column;padding:0;">
+            <div class="flex items-center justify-between px-5 py-3 border-b bg-slate-50">
+                <div class="flex items-center gap-4">
+                    <h3 class="text-lg font-semibold">🔄 필드 메타데이터 마이그레이션</h3>
+                    <span id="migLastDate" class="text-xs text-gray-400"></span>
+                </div>
+                <button onclick="closeMigration()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <!-- 분석 설정 바 -->
+            <div class="px-5 py-3 border-b bg-blue-50 flex items-center gap-4 flex-wrap">
+                <span class="text-sm font-medium text-gray-700">분석 기간:</span>
+                <input type="number" id="migDays" value="7" min="1" max="90" class="form-input text-sm w-20">
+                <span class="text-sm text-gray-500">일</span>
+                <select id="migMode" class="form-input text-sm w-56">
+                    <option value="merge">기존 데이터에 추가 병합</option>
+                    <option value="overwrite">기존 데이터 삭제 후 새로 구성</option>
+                </select>
+                <button onclick="runAnalyze()" class="btn btn-primary text-sm">🔍 이벤트 분석 실행</button>
+                <span id="migAnalyzeStatus" class="text-xs text-gray-400"></span>
+            </div>
+            <div class="flex flex-1 overflow-hidden">
+                <!-- 좌: 이벤트 목록 -->
+                <div class="w-96 border-r bg-gray-50 flex flex-col">
+                    <div class="px-3 py-2 border-b text-xs text-gray-500 font-medium">이벤트 목록</div>
+                    <div id="migEventList" class="flex-1 overflow-y-auto p-2 space-y-1">
+                        <div class="text-center text-gray-400 text-sm py-8">분석을 실행하세요</div>
+                    </div>
+                </div>
+                <!-- 우: 필드 설정 -->
+                <div class="flex-1 flex flex-col overflow-hidden">
+                    <div id="migFieldArea" class="flex-1 overflow-y-auto p-5">
+                        <div class="text-gray-400 text-center mt-20">← 분석 실행 후 이벤트를 선택하세요</div>
+                    </div>
+                    <div class="border-t px-5 py-3 flex justify-between bg-gray-50">
+                        <button onclick="resetMigration()" class="btn text-sm" style="background:#ef4444;color:white;border:none">🗑 초기화</button>
+                        <button onclick="saveMigration()" class="btn btn-primary text-sm">💾 메타데이터 저장</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UML 룰 빌더 모달 -->
+    <div id="builderModal" class="modal">
+        <div class="modal-content" style="width:95vw;max-width:1400px;height:90vh;display:flex;flex-direction:column;padding:0;">
+            <div class="flex items-center justify-between px-5 py-3 border-b bg-slate-50">
+                <div class="flex items-center gap-4">
+                    <h3 class="text-lg font-semibold">🔧 규칙 빌더</h3>
+                    <select id="builderRuleType" class="form-input text-sm" style="width:160px" oninput="updateBuilderUI()">
+                        <option value="cep">CEP (실시간 알림)</option>
+                    </select>
+                    <input type="text" id="builderRuleName" class="form-input" style="width:280px" placeholder="규칙 이름">
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="clearCanvas()" class="btn btn-secondary text-sm">초기화</button>
+                    <button onclick="testRule()" class="btn btn-secondary text-sm">테스트</button>
+                    <button onclick="saveRule()" class="btn btn-primary text-sm">저장</button>
+                    <button onclick="closeBuilder()" class="btn btn-secondary text-sm">닫기</button>
+                </div>
+            </div>
+            <div class="flex flex-1 overflow-hidden">
+                <!-- 노드 팔레트 -->
+                <div class="w-48 bg-gray-50 border-r p-3 overflow-y-auto">
+                    <div class="text-xs font-semibold text-gray-500 mb-2">노드</div>
+                    <div class="space-y-2">
+                        <div class="palette-node" draggable="true" data-type="event">
+                            <span class="text-lg">📥</span>
+                            <span>이벤트</span>
+                        </div>
+                        <div class="palette-node" draggable="true" data-type="action">
+                            <span class="text-lg">🔔</span>
+                            <span>액션</span>
+                        </div>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-4 p-2 bg-white rounded border">
+                        <div class="font-semibold mb-1">사용법</div>
+                        <div>1. 노드 드래그해서 배치</div>
+                        <div>2. ● 점 드래그로 연결</div>
+                        <div>3. 연결선 클릭 → 시간 설정</div>
+                        <div>4. 노드 클릭 → 속성 편집</div>
+                    </div>
+                </div>
+                
+                <!-- 캔버스 -->
+                <div class="flex-1 relative bg-white" style="background-image: radial-gradient(circle, #ddd 1px, transparent 1px); background-size: 20px 20px;">
+                    <div id="canvas" class="absolute inset-0 overflow-auto">
+                        <svg id="canvasSvg" width="100%" height="100%" style="position:absolute;pointer-events:none;"></svg>
+                        <div id="nodesContainer" style="position:relative;width:2000px;height:1500px;"></div>
+                    </div>
+                </div>
+                
+                <!-- 속성 패널 -->
+                <div id="propsPanel" class="w-72 bg-gray-50 border-l p-4 overflow-y-auto">
+                    <div class="text-xs font-semibold text-gray-500 mb-3">속성</div>
+                    <div id="propsContent" class="text-sm text-gray-400">노드를 선택하세요</div>
+                </div>
+            </div>
+            <!-- 생성된 SQL 미리보기 -->
+            <div class="border-t bg-slate-900 text-green-400 p-3 font-mono text-xs" style="max-height:120px;overflow:auto;">
+                <div class="text-gray-500 mb-1">-- Generated Flink SQL</div>
+                <pre id="sqlPreview">SELECT * FROM events WHERE ...</pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- 규칙 수정 모달 -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold mb-4" id="modalTitle">규칙 수정</h3>
+            <form id="editForm">
+                <input type="hidden" id="editRuleId">
+                <input type="hidden" id="editRuleType">
+                
+                <div class="form-group">
+                    <label class="form-label">규칙 이름</label>
+                    <input type="text" id="editName" class="form-input">
+                </div>
+                
+                <div id="weightGroup" class="form-group">
+                    <label class="form-label">가중치 (UEBA)</label>
+                    <input type="number" id="editWeight" class="form-input" min="1" max="20" step="1">
+                    <p class="form-hint">1~20 (높을수록 위험도 기여 증가)</p>
+                </div>
+                
+                <div id="severityGroup" class="form-group">
+                    <label class="form-label">등급 (CEP)</label>
+                    <select id="editSeverity" class="form-select">
+                        <option value="CRITICAL">CRITICAL (긴급)</option>
+                        <option value="HIGH">HIGH (주의)</option>
+                        <option value="MEDIUM">MEDIUM (보통)</option>
+                        <option value="LOW">LOW (낮음)</option>
+                    </select>
+                </div>
+                
+                <div id="windowGroup" class="form-group">
+                    <label class="form-label">시간 윈도우</label>
+                    <div class="flex gap-2">
+                        <input type="number" id="editWindowValue" class="form-input w-24" min="1" max="60">
+                        <select id="editWindowUnit" class="form-select w-24">
+                            <option value="m">분</option>
+                            <option value="h">시간</option>
+                        </select>
+                        <span class="flex items-center text-gray-500 text-sm">내</span>
+                    </div>
+                </div>
+                
+                <div id="thresholdGroup" class="form-group">
+                    <label class="form-label">임계값 (횟수/합계)</label>
+                    <input type="number" id="editThreshold" class="form-input" min="1">
+                    <p class="form-hint">윈도우 내 이 횟수 이상 발생 시 알림</p>
+                </div>
+                
+                <div id="conditionFields"></div>
+                
+                <div class="form-group">
+                    <label class="form-label">규칙 JSON (원본 데이터)</label>
+                    <textarea id="editJson" class="form-input" rows="10" style="font-family:monospace;font-size:12px;white-space:pre;tab-size:2"></textarea>
+                    <p class="form-hint">규칙 JSON을 직접 수정할 수 있습니다. 저장 시 이 JSON이 OpenSearch에 저장됩니다.</p>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label flex items-center gap-2">
+                        <input type="checkbox" id="editEnabled" checked>
+                        <span>규칙 활성화</span>
+                    </label>
+                </div>
+                
+                <div class="flex justify-end gap-3 mt-6">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
+                    <button type="submit" class="btn btn-primary">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let rulesData = {};
+        const categoryNames = {
+            'media_control': '매체 제어', 'output_security': '출력 보안', 'screen_security': '화면 보안',
+            'system_access': '시스템/접근', 'agent': '에이전트', 'network': '네트워크',
+            'process': '프로세스', 'security': '보안', 'auth': '인증', 'device': '장치', 'output': '출력', 'system': '시스템'
+        };
+        
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                document.getElementById('cep-panel').classList.toggle('hidden', this.dataset.tab !== 'cep');
+                document.getElementById('ueba-panel').classList.toggle('hidden', this.dataset.tab !== 'ueba');
+            });
+        });
+
+        // 규칙 로드
+        fetch('/api/cep/rules').then(r => r.json()).then(data => {
+            const rules = data.rules || data;
+            rulesData = {};
+            rules.forEach(r => { r.id = r.id || r.ruleId; rulesData[r.id] = r; });
+            
+            document.getElementById('cepCount').textContent = `(${rules.length})`;
+            
+            // CEP 테이블
+            const cepBody = document.querySelector('#cepTable tbody');
+            cepBody.innerHTML = '';
+            rules.sort((a,b) => (a.name||'').localeCompare(b.name||'')).forEach(r => {
+                const sev = r.cep?.severity || r.severity || 'MEDIUM';
+                const badge = sev === 'CRITICAL' ? 'badge-critical' : sev === 'HIGH' ? 'badge-high' : sev === 'MEDIUM' ? 'badge-medium' : 'badge-low';
+                const enabled = r.enabled !== false;
+                const enabledBadge = enabled ? '<span class="badge" style="background:#dcfce7;color:#166534">ON</span>' : '<span class="badge" style="background:#fee2e2;color:#991b1b">OFF</span>';
+                
+                // 탐지조건 파싱: conditions 또는 patterns에서 추출
+                let condText = r.description || '';
+                if (!condText || condText === r.name) {
+                    const conds = r.conditions || r.patterns?.[0]?.match?.conditions || [];
+                    const msgId = r.patterns?.[0]?.match?.msgId || '';
+                    const parts = [];
+                    if (msgId) parts.push(msgId.replace('MESSAGE_',''));
+                    conds.forEach(c => {
+                        if (c.field === 'msgId') { if (!msgId) parts.push(String(c.value).replace('MESSAGE_','')); }
+                        else if (c.op === 'time_range') parts.push(c.start + ':00~' + c.end + ':00');
+                        else if (c.op === 'gte') parts.push(c.field + '≥' + formatValue(c.value));
+                        else if (c.op === 'in') parts.push(c.field + ' in [' + (Array.isArray(c.value)?c.value.join(','):c.value) + ']');
+                        else parts.push(c.field + ' ' + c.op + ' ' + c.value);
+                    });
+                    if (r.aggregate?.count?.min) parts.push(r.aggregate.count.min + '회↑');
+                    if (r.patterns?.length > 1) parts.push(r.patterns.length + '단계 순차');
+                    condText = parts.join(' · ') || '-';
+                }
+                
+                cepBody.innerHTML += `<tr class="editable" data-rule-id="${r.id}" style="${enabled?'':'opacity:0.5'}">
+                    <td class="font-medium">${r.name}</td>
+                    <td class="text-center">${enabledBadge}</td>
+                    <td><span class="badge ${badge}">${sev}</span></td>
+                    <td class="text-gray-500 text-sm">${categoryNames[r.category] || r.category || '-'}</td>
+                    <td class="text-gray-600 text-sm" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${condText}">${condText}</td>
+                </tr>`;
+            });
+            
+            // 클릭 이벤트
+            document.querySelectorAll('tr.editable').forEach(row => {
+                row.addEventListener('click', () => openEditModal(row.dataset.ruleId));
+            });
+        });
+        
+        function formatConditions(conditions) {
+            return conditions.map(c => {
+                if (c.op === 'time_range') return `${c.start}:00~${c.end}:00`;
+                if (c.op === 'gte') return `${c.field}≥${formatValue(c.value)}`;
+                if (c.op === 'gt') return `${c.field}>${formatValue(c.value)}`;
+                if (c.op === 'eq') return `${c.field}=${c.value}`;
+                if (c.op === 'in') return `${c.field} in [${Array.isArray(c.value) ? c.value.join(',') : c.value}]`;
+                return `${c.field} ${c.op} ${c.value}`;
+            }).join(', ');
+        }
+        
+        function formatValue(v) {
+            if (typeof v !== 'number') return v;
+            if (v >= 1048576) return Math.round(v / 1048576) + 'MB';
+            if (v >= 1024) return Math.round(v / 1024) + 'KB';
+            return v;
+        }
+        
+        function openEditModal(ruleId) {
+            const rule = rulesData[ruleId];
+            if (!rule) return;
+            
+            const isCep = rule.cep?.enabled;
+            const isUeba = rule.ueba?.enabled;
+            
+            document.getElementById('modalTitle').textContent = isCep ? 'CEP 규칙 수정' : 'UEBA 규칙 수정';
+            document.getElementById('editRuleId').value = ruleId;
+            document.getElementById('editRuleType').value = isCep ? 'cep' : 'ueba';
+            document.getElementById('editName').value = rule.name;
+            document.getElementById('editEnabled').checked = rule.enabled;
+            
+            // CEP/UEBA별 필드 표시
+            document.getElementById('weightGroup').style.display = isUeba ? 'block' : 'none';
+            document.getElementById('severityGroup').style.display = isCep ? 'block' : 'none';
+            document.getElementById('windowGroup').style.display = isCep && rule.cep?.window ? 'block' : 'none';
+            document.getElementById('thresholdGroup').style.display = isCep && rule.cep?.threshold > 1 ? 'block' : 'none';
+            
+            if (isUeba) {
+                document.getElementById('editWeight').value = rule.weight;
+            }
+            if (isCep) {
+                document.getElementById('editSeverity').value = rule.cep?.severity || 'MEDIUM';
+                if (rule.cep?.window) {
+                    const match = rule.cep.window.match(/(\d+)([mh])/);
+                    if (match) {
+                        document.getElementById('editWindowValue').value = match[1];
+                        document.getElementById('editWindowUnit').value = match[2];
+                    }
+                }
+                document.getElementById('editThreshold').value = rule.cep?.threshold || 1;
+            }
+            
+            // 조건 필드
+            const condFields = document.getElementById('conditionFields');
+            condFields.innerHTML = '';
+            (rule.match?.conditions || []).forEach((cond, idx) => {
+                if (cond.op === 'gte' || cond.op === 'gt') {
+                    const isMB = typeof cond.value === 'number' && cond.value >= 1048576;
+                    const displayVal = isMB ? Math.round(cond.value / 1048576) : cond.value;
+                    const label = cond.field === 'fileSize' ? '파일 크기' : cond.field === 'pageCount' ? '페이지 수' : cond.field;
+                    condFields.innerHTML += `
+                        <div class="form-group">
+                            <label class="form-label">${label} (${cond.op === 'gte' ? '이상' : '초과'})</label>
+                            <div class="flex gap-2">
+                                <input type="number" class="form-input cond-value" data-idx="${idx}" data-unit="${isMB ? 'MB' : ''}" value="${displayVal}" min="1">
+                                ${isMB ? '<span class="flex items-center text-gray-500">MB</span>' : ''}
+                            </div>
+                        </div>`;
+                } else if (cond.op === 'time_range') {
+                    condFields.innerHTML += `
+                        <div class="form-group">
+                            <label class="form-label">시간 범위</label>
+                            <div class="flex gap-2 items-center">
+                                <input type="number" class="form-input w-20 cond-start" data-idx="${idx}" value="${cond.start}" min="0" max="23">
+                                <span>시 ~</span>
+                                <input type="number" class="form-input w-20 cond-end" data-idx="${idx}" value="${cond.end}" min="0" max="23">
+                                <span>시</span>
+                            </div>
+                        </div>`;
+                }
+            });
+            
+            // JSON 편집 영역에 원본 데이터 표시 (sql 제외)
+            const jsonData = JSON.parse(JSON.stringify(rule));
+            delete jsonData.sql;  // SQL은 Go CEP 서비스가 자동 생성
+            document.getElementById('editJson').value = JSON.stringify(jsonData, null, 2);
+            
+            document.getElementById('editModal').classList.add('show');
+        }
+        
+        function closeModal() {
+            document.getElementById('editModal').classList.remove('show');
+        }
+        
+        document.getElementById('editForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const ruleId = document.getElementById('editRuleId').value;
+            const ruleType = document.getElementById('editRuleType').value;
+            const rule = rulesData[ruleId];
+            
+            rule.enabled = document.getElementById('editEnabled').checked;
+            rule.updatedAt = new Date().toISOString();
+            
+            if (ruleType === 'ueba') {
+                rule.weight = parseFloat(document.getElementById('editWeight').value);
+            } else {
+                rule.cep.severity = document.getElementById('editSeverity').value;
+                if (rule.cep.window) {
+                    const val = document.getElementById('editWindowValue').value;
+                    const unit = document.getElementById('editWindowUnit').value;
+                    rule.cep.window = val + unit;
+                }
+                if (rule.cep.threshold > 1) {
+                    rule.cep.threshold = parseInt(document.getElementById('editThreshold').value);
+                }
+            }
+            
+            // 조건 값 업데이트
+            document.querySelectorAll('.cond-value').forEach(input => {
+                const idx = parseInt(input.dataset.idx);
+                let val = parseFloat(input.value);
+                if (input.dataset.unit === 'MB') val *= 1048576;
+                rule.match.conditions[idx].value = val;
+            });
+            document.querySelectorAll('.cond-start').forEach(input => {
+                rule.match.conditions[parseInt(input.dataset.idx)].start = parseInt(input.value);
+            });
+            document.querySelectorAll('.cond-end').forEach(input => {
+                rule.match.conditions[parseInt(input.dataset.idx)].end = parseInt(input.value);
+            });
+            
+            // JSON 편집 영역의 내용을 파싱하여 저장
+            let saveData;
+            try {
+                saveData = JSON.parse(document.getElementById('editJson').value);
+            } catch(e) {
+                alert('JSON 형식 오류: ' + e.message);
+                return;
+            }
+            saveData.enabled = document.getElementById('editEnabled').checked;
+            saveData.name = document.getElementById('editName').value;
+            if (saveData.cep) saveData.cep.severity = document.getElementById('editSeverity').value;
+            
+            const res = await fetch(`/api/cep/rules/${ruleId}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(saveData)
+            });
+            
+            if (res.ok) {
+                alert('규칙이 저장되었습니다.');
+                closeModal();
+                location.reload();
+            } else {
+                alert('저장 실패');
+            }
+        });
+        
+        document.getElementById('editModal').addEventListener('click', (e) => {
+            if (e.target.id === 'editModal') closeModal();
+        });
+
+        // ========== UML Rule Builder ==========
+        const eventTypes = [
+            {
+                id: 'MESSAGE_AGENT_AUTHENTICATION', name: '사용자 인증', category: 'agent',
+                fields: [
+                    {id: 'act', name: '동작', type: 'enum', values: [
+                        {v: 'login', label: '로그인'}, {v: 'logout', label: '로그아웃'}
+                    ]},
+                    {id: 'outcome', name: '결과', type: 'enum', values: [
+                        {v: 'success', label: '성공'}, {v: 'failure', label: '실패'}
+                    ]}
+                ]
+            },
+            {
+                id: 'MESSAGE_DEVICE_USAGE', name: '장치 사용', category: 'device',
+                fields: [
+                    {id: 'act', name: '동작', type: 'enum', values: [
+                        {v: 'connect', label: '연결'}, {v: 'read', label: '읽기'}, {v: 'write', label: '쓰기'}
+                    ]},
+                    {id: 'outcome', name: '결과', type: 'enum', values: [
+                        {v: 'allowed', label: '허용'}, {v: 'blocked', label: '차단'}
+                    ]},
+                    {id: 'cs1', name: '장치 타입', type: 'enum', values: [
+                        {v: 'removable', label: 'USB'}, {v: 'bluetooth', label: '블루투스'}, {v: 'cdrom', label: 'CD/DVD'}, {v: 'mtp', label: 'MTP'}
+                    ]},
+                    {id: 'fsize', name: '파일 크기', type: 'number', unit: 'MB'}
+                ]
+            },
+            {
+                id: 'MESSAGE_NETWORK_WEBSITEACCESS', name: '웹사이트 접근', category: 'network',
+                fields: [
+                    {id: 'act', name: '동작', type: 'enum', values: [
+                        {v: 'navigate', label: '접속'}, {v: 'file_attachment', label: '파일 업로드'}, {v: 'content', label: '내용 전송'}
+                    ]},
+                    {id: 'outcome', name: '결과', type: 'enum', values: [
+                        {v: 'allowed', label: '허용'}, {v: 'blocked', label: '차단'}
+                    ]},
+                    {id: 'dhost', name: '사이트 주소', type: 'string'},
+                    {id: 'fsize', name: '파일 크기', type: 'number', unit: 'MB'}
+                ]
+            },
+            {
+                id: 'MESSAGE_NETWORK_MESSENGERACTIVITY', name: '메신저 활동', category: 'network',
+                fields: [
+                    {id: 'act', name: '동작', type: 'enum', values: [
+                        {v: 'file_attachment', label: '파일 전송'}, {v: 'content', label: '내용 전송'}, {v: 'clipboard', label: '클립보드'}
+                    ]},
+                    {id: 'outcome', name: '결과', type: 'enum', values: [
+                        {v: 'allowed', label: '허용'}, {v: 'blocked', label: '차단'}
+                    ]},
+                    {id: 'app', name: '메신저', type: 'string'},
+                    {id: 'fsize', name: '파일 크기', type: 'number', unit: 'MB'}
+                ]
+            },
+            {
+                id: 'MESSAGE_PRINT_USAGE', name: '프린트 사용', category: 'print',
+                fields: [
+                    {id: 'outcome', name: '결과', type: 'enum', values: [
+                        {v: 'allowed', label: '허용'}, {v: 'blocked', label: '차단'}
+                    ]},
+                    {id: 'cn4', name: '페이지 수', type: 'number', unit: '장'},
+                    {id: 'cs1', name: '프린터명', type: 'string'}
+                ]
+            },
+            {
+                id: 'MESSAGE_PROCESS_CONTROL', name: '프로그램 실행', category: 'process',
+                fields: [
+                    {id: 'outcome', name: '결과', type: 'enum', values: [
+                        {v: 'allowed', label: '허용'}, {v: 'blocked', label: '차단'}
+                    ]},
+                    {id: 'reason', name: '사유', type: 'enum', values: [
+                        {v: 'blacklist', label: '블랙리스트'}, {v: 'whitelist', label: '화이트리스트'}, {v: 'unregistered', label: '미등록'}
+                    ]},
+                    {id: 'fname', name: '프로그램명', type: 'string'}
+                ]
+            },
+            {
+                id: 'MESSAGE_CAPTURE_BLOCK', name: '캡처 차단', category: 'security',
+                fields: [
+                    {id: 'outcome', name: '결과', type: 'enum', values: [
+                        {v: 'allowed', label: '허용'}, {v: 'blocked', label: '차단'}
+                    ]},
+                    {id: 'fname', name: '프로그램명', type: 'string'}
+                ]
+            },
+            {
+                id: 'MESSAGE_CLIPBOARD_BLOCK', name: '클립보드 차단', category: 'security',
+                fields: [
+                    {id: 'cs1', name: '내용 타입', type: 'enum', values: [
+                        {v: 'text', label: '텍스트'}, {v: 'file', label: '파일'}, {v: 'image', label: '이미지'}
+                    ]}
+                ]
+            },
+            {
+                id: 'MESSAGE_AGENT_UNINSTALL', name: '에이전트 삭제', category: 'agent',
+                fields: [
+                    {id: 'act', name: '삭제 방식', type: 'enum', values: [
+                        {v: 'online_uninstall', label: '온라인 삭제'}, {v: 'offline_uninstall', label: '오프라인 삭제'}
+                    ]}
+                ]
+            },
+            {
+                id: 'MESSAGE_SCREENBLOCKER_EVENT', name: '불법촬영 감지', category: 'security',
+                fields: [
+                    {id: 'eventType', name: '이벤트 종류', type: 'enum', values: [
+                        {v: 'photo', label: '촬영 감지'}, {v: 'facelost', label: '자리 이탈'}, {v: 'webcamblock', label: '웹캠 가림'}
+                    ]},
+                    {id: 'blockType', name: '차단 동작', type: 'enum', values: [
+                        {v: 'screen_saver', label: '화면보호기'}, {v: 'logoff', label: '로그오프'}, {v: 'visible_watermark', label: '워터마크'}
+                    ]}
+                ]
+            }
+        ];
+        
+        // 필드 매핑: CEF → OpenSearch
+        const fieldMap = {
+            'msgid': 'msgId',
+            'suid': 'userId',
+            'act': 'action',
+            'rt': '@timestamp',
+            'src': 'userIp',
+            'shost': 'hostname',
+            'fsize': 'fileSize',
+            'fname': 'fileName',
+            'dhost': 'destHost',
+            'cs1': 'deviceType',
+            'cn4': 'pageCount'
+        };
+        
+        function mapField(field) {
+            return fieldMap[field] || field;
+        }
+        
+        function parseWindow(w) {
+            if (!w) return {val: 0, unit: 'MINUTE'};
+            const num = parseInt(w.replace(/[^0-9]/g, '')) || 10;
+            const unit = w.toLowerCase().includes('h') ? 'HOUR' : 'MINUTE';
+            return {val: num, unit};
+        }
+        
+        let nodes = [];
+        let edges = [];
+        let selectedNode = null;
+        let nodeIdCounter = 1;
+        let dragNode = null;
+        let dragOffset = {x: 0, y: 0};
+        let connecting = null;
+        
+        function openRuleBuilder() {
+            document.getElementById('builderModal').classList.add('show');
+            document.getElementById('builderRuleName').value = '';
+            clearCanvas();
+        }
+        
+        function closeBuilder() {
+            document.getElementById('builderModal').classList.remove('show');
+        }
+        
+        function clearCanvas() {
+            nodes = [];
+            edges = [];
+            selectedNode = null;
+            nodeIdCounter = 1;
+            renderCanvas();
+            updateSqlPreview();
+            document.getElementById('propsContent').innerHTML = '<span class="text-gray-400">노드를 선택하세요</span>';
+        }
+        
+        // 팔레트 드래그
+        document.querySelectorAll('.palette-node').forEach(el => {
+            el.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('nodeType', el.dataset.type);
+            });
+        });
+        
+        document.getElementById('nodesContainer').addEventListener('dragover', (e) => e.preventDefault());
+        document.getElementById('nodesContainer').addEventListener('drop', (e) => {
+            e.preventDefault();
+            const type = e.dataTransfer.getData('nodeType');
+            if (!type) return;
+            
+            const rect = e.currentTarget.getBoundingClientRect();
+            const scrollLeft = document.getElementById('canvas').scrollLeft;
+            const scrollTop = document.getElementById('canvas').scrollTop;
+            const x = e.clientX - rect.left + scrollLeft - 80;
+            const y = e.clientY - rect.top + scrollTop - 30;
+            
+            addNode(type, x, y);
+        });
+        
+        function addNode(type, x, y) {
+            const id = 'n' + nodeIdCounter++;
+            const node = {id, type, x, y, data: getDefaultData(type)};
+            nodes.push(node);
+            renderCanvas();
+            selectNode(id);
+            updateSqlPreview();
+        }
+        
+        function getDefaultData(type) {
+            switch(type) {
+                case 'event': return {msgId: 'MESSAGE_AGENT_AUTHENTICATION', conditions: [], window: null, count: 1};
+                case 'action': return {severity: 'HIGH', score: 15, message: '이상 행위 탐지'};
+            }
+        }
+        
+        function renderCanvas() {
+            const container = document.getElementById('nodesContainer');
+            container.innerHTML = '';
+            
+            nodes.forEach(node => {
+                const el = document.createElement('div');
+                el.className = `canvas-node ${node.type}`;
+                el.id = node.id;
+                el.style.left = node.x + 'px';
+                el.style.top = node.y + 'px';
+                if (selectedNode === node.id) el.classList.add('selected');
+                
+                el.innerHTML = `
+                    <div class="node-delete" onclick="deleteNode('${node.id}')">×</div>
+                    <div class="node-port in" data-node="${node.id}" data-port="in"></div>
+                    <div class="node-port out" data-node="${node.id}" data-port="out"></div>
+                    <div class="node-header">${getNodeIcon(node.type)} ${getNodeTitle(node)}</div>
+                    <div class="node-body">${getNodeBody(node)}</div>
+                `;
+                
+                el.addEventListener('mousedown', (e) => {
+                    if (e.target.classList.contains('node-port') || e.target.classList.contains('node-delete')) return;
+                    e.preventDefault();
+                    selectNode(node.id);
+                    dragNode = node;
+                    dragOffset = {x: e.clientX - node.x, y: e.clientY - node.y};
+                });
+                
+                // 포트 연결 이벤트
+                const outPort = el.querySelector('.node-port.out');
+                
+                outPort.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    connecting = {
+                        from: node.id,
+                        startX: node.x + el.offsetWidth,
+                        startY: node.y + el.offsetHeight / 2
+                    };
+                    // 연결선 미리보기
+                    const svg = document.getElementById('canvasSvg');
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.id = 'tempLine';
+                    line.setAttribute('stroke', '#3b82f6');
+                    line.setAttribute('stroke-width', '2');
+                    line.setAttribute('stroke-dasharray', '5,5');
+                    line.setAttribute('x1', connecting.startX);
+                    line.setAttribute('y1', connecting.startY);
+                    line.setAttribute('x2', connecting.startX);
+                    line.setAttribute('y2', connecting.startY);
+                    svg.appendChild(line);
+                });
+                
+                // 노드 전체에서 연결 받기
+                el.addEventListener('mouseup', (e) => {
+                    if (connecting && connecting.from !== node.id) {
+                        const exists = edges.some(ed => ed.from === connecting.from && ed.to === node.id);
+                        if (!exists) {
+                            edges.push({from: connecting.from, to: node.id});
+                            connecting = null;
+                            const tempLine = document.getElementById('tempLine');
+                            if (tempLine) tempLine.remove();
+                            renderEdges();
+                            updateSqlPreview();
+                        }
+                    }
+                });
+                
+                container.appendChild(el);
+            });
+            
+            renderEdges();
+        }
+        
+        function renderEdges() {
+            const svg = document.getElementById('canvasSvg');
+            const container = document.getElementById('nodesContainer');
+            svg.innerHTML = '';
+            svg.style.width = container.style.width;
+            svg.style.height = container.style.height;
+            
+            // 화살표 마커
+            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            defs.innerHTML = `<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6"/></marker>`;
+            svg.appendChild(defs);
+            
+            edges.forEach((edge, idx) => {
+                const fromNode = nodes.find(n => n.id === edge.from);
+                const toNode = nodes.find(n => n.id === edge.to);
+                if (!fromNode || !toNode) return;
+                
+                const fromEl = document.getElementById(fromNode.id);
+                const toEl = document.getElementById(toNode.id);
+                if (!fromEl || !toEl) return;
+                
+                const x1 = fromNode.x + fromEl.offsetWidth;
+                const y1 = fromNode.y + fromEl.offsetHeight / 2;
+                const x2 = toNode.x;
+                const y2 = toNode.y + toEl.offsetHeight / 2;
+                
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                const midX = (x1 + x2) / 2;
+                path.setAttribute('d', `M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`);
+                path.setAttribute('stroke', '#3b82f6');
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('marker-end', 'url(#arrowhead)');
+                path.style.cursor = 'pointer';
+                path.addEventListener('click', () => showEdgeProps(idx));
+                svg.appendChild(path);
+                
+                // 시간 라벨
+                if (edge.within) {
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', midX);
+                    text.setAttribute('y', (y1 + y2) / 2 - 8);
+                    text.setAttribute('text-anchor', 'middle');
+                    text.setAttribute('fill', '#3b82f6');
+                    text.setAttribute('font-size', '12');
+                    text.setAttribute('font-weight', '600');
+                    text.style.cursor = 'pointer';
+                    text.textContent = edge.within + ' 내';
+                    text.addEventListener('click', () => showEdgeProps(idx));
+                    svg.appendChild(text);
+                }
+            });
+        }
+        
+        function showEdgeProps(idx) {
+            const edge = edges[idx];
+            const within = prompt('시간 간격 (예: 10m, 1h, 30s):', edge.within || '10m');
+            if (within !== null) {
+                if (within === '' || within === '0') {
+                    if (confirm('연결을 삭제하시겠습니까?')) {
+                        edges.splice(idx, 1);
+                    }
+                } else {
+                    edge.within = within;
+                }
+                renderEdges();
+                updateSqlPreview();
+            }
+        }
+        
+        document.addEventListener('mousemove', (e) => {
+            if (dragNode) {
+                dragNode.x = Math.max(0, e.clientX - dragOffset.x);
+                dragNode.y = Math.max(0, e.clientY - dragOffset.y);
+                renderCanvas();
+            }
+            // 연결선 미리보기
+            if (connecting) {
+                const line = document.getElementById('tempLine');
+                if (line) {
+                    const rect = document.getElementById('nodesContainer').getBoundingClientRect();
+                    const canvas = document.getElementById('canvas');
+                    const x = e.clientX - rect.left + canvas.scrollLeft;
+                    const y = e.clientY - rect.top + canvas.scrollTop;
+                    line.setAttribute('x2', x);
+                    line.setAttribute('y2', y);
+                }
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            dragNode = null;
+            connecting = null;
+            const tempLine = document.getElementById('tempLine');
+            if (tempLine) tempLine.remove();
+        });
+        
+        function getNodeIcon(type) {
+            return {event: '📥', condition: '◇', window: '⏱️', action: '🔔'}[type];
+        }
+        
+        function getNodeTitle(node) {
+            switch(node.type) {
+                case 'event': 
+                    const ev = eventTypes.find(e => e.id === node.data.msgId);
+                    return ev?.name || '이벤트';
+                case 'action': return node.data.severity;
+            }
+        }
+        
+        function getNodeBody(node) {
+            switch(node.type) {
+                case 'event':
+                    let parts = [];
+                    if (node.data.count > 1) {
+                        parts.push(`${node.data.window || ''} ${node.data.count}회 이상`);
+                    }
+                    node.data.conditions.forEach(c => {
+                        const evType = eventTypes.find(e => e.id === node.data.msgId);
+                        const field = evType?.fields.find(f => f.id === c.field);
+                        if (field?.type === 'enum') {
+                            const valLabel = field.values.find(v => v.v === c.value)?.label || c.value;
+                            parts.push(`${c.label || field.name}: ${valLabel}`);
+                        } else if (field?.type === 'number') {
+                            const opLabel = c.op === '>' ? '초과' : c.op === '>=' ? '이상' : c.op === '<' ? '미만' : c.op;
+                            const dispVal = c.unit === 'MB' ? (c.value / 1048576) + 'MB' : c.value + (c.unit || '');
+                            parts.push(`${c.label || field?.name}: ${dispVal} ${opLabel}`);
+                        } else {
+                            parts.push(`${c.label || c.field}: ${c.value}`);
+                        }
+                    });
+                    return parts.length ? parts.join('<br>') : '클릭하여 설정';
+                case 'action':
+                    const ruleType = document.getElementById('builderRuleType')?.value || 'cep';
+                    if (ruleType === 'cep') {
+                        return node.data.severity;
+                    } else {
+                        return `가중치: ${node.data.score}`;
+                    }
+            }
+        }
+        
+        function updateBuilderUI() {
+            const actionNode = nodes.find(n => n.type === 'action');
+            if (actionNode) {
+                showProps(actionNode);
+            }
+            renderCanvas();
+        }
+        
+        function formatCondValue(v) {
+            if (typeof v === 'number' && v >= 1048576) return Math.round(v/1048576) + 'MB';
+            return v;
+        }
+        
+        function selectNode(id) {
+            selectedNode = id;
+            renderCanvas();
+            showProps(nodes.find(n => n.id === id));
+        }
+        
+        function deleteNode(id) {
+            nodes = nodes.filter(n => n.id !== id);
+            edges = edges.filter(e => e.from !== id && e.to !== id);
+            if (selectedNode === id) selectedNode = null;
+            renderCanvas();
+            updateSqlPreview();
+            document.getElementById('propsContent').innerHTML = '<span class="text-gray-400">노드를 선택하세요</span>';
+        }
+        
+        function showProps(node) {
+            if (!node) return;
+            const panel = document.getElementById('propsContent');
+            const evType = eventTypes.find(e => e.id === node.data.msgId);
+            const evFields = evType?.fields || [];
+            
+            let html = `<div class="space-y-3">`;
+            
+            if (node.type === 'event') {
+                html += `
+                    <div>
+                        <label class="form-label">이벤트 종류</label>
+                        <select class="form-input text-sm" oninput="updateNodeData('${node.id}', 'msgId', this.value); showProps(nodes.find(n=>n.id==='${node.id}'))">
+                            <optgroup label="인증/에이전트">
+                                ${eventTypes.filter(e=>e.category==='agent').map(e => `<option value="${e.id}" ${node.data.msgId === e.id ? 'selected' : ''}>${e.name}</option>`).join('')}
+                            </optgroup>
+                            <optgroup label="장치">
+                                ${eventTypes.filter(e=>e.category==='device').map(e => `<option value="${e.id}" ${node.data.msgId === e.id ? 'selected' : ''}>${e.name}</option>`).join('')}
+                            </optgroup>
+                            <optgroup label="네트워크">
+                                ${eventTypes.filter(e=>e.category==='network').map(e => `<option value="${e.id}" ${node.data.msgId === e.id ? 'selected' : ''}>${e.name}</option>`).join('')}
+                            </optgroup>
+                            <optgroup label="출력/프로세스">
+                                ${eventTypes.filter(e=>e.category==='print'||e.category==='process').map(e => `<option value="${e.id}" ${node.data.msgId === e.id ? 'selected' : ''}>${e.name}</option>`).join('')}
+                            </optgroup>
+                            <optgroup label="보안">
+                                ${eventTypes.filter(e=>e.category==='security').map(e => `<option value="${e.id}" ${node.data.msgId === e.id ? 'selected' : ''}>${e.name}</option>`).join('')}
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="border-t pt-3">
+                        <label class="form-label">발생 횟수</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="number" class="form-input text-sm w-20" value="${node.data.count}" min="1" oninput="updateNodeData('${node.id}', 'count', parseInt(this.value))">
+                            <span class="text-sm text-gray-500">회 이상</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label">집계 시간 (횟수 조건용)</label>
+                        <input type="text" class="form-input text-sm" value="${node.data.window || ''}" placeholder="예: 10m, 1h" oninput="updateNodeData('${node.id}', 'window', this.value || null)">
+                        <p class="text-xs text-gray-400 mt-1">비워두면 단일 이벤트 감지</p>
+                    </div>`;
+                
+                // 필드별 조건 추가 UI
+                if (evFields.length > 0) {
+                    html += `<div class="border-t pt-3">
+                        <label class="form-label">세부 조건</label>
+                        <div class="space-y-2 mb-2">`;
+                    
+                    evFields.forEach(field => {
+                        const existing = node.data.conditions.find(c => c.field === field.id);
+                        
+                        if (field.type === 'enum') {
+                            html += `<div class="flex items-center gap-2">
+                                <span class="text-xs text-gray-600 w-20">${field.name}</span>
+                                <select class="form-input text-xs flex-1" oninput="setCondition('${node.id}', '${field.id}', '=', this.value, '${field.name}')">
+                                    <option value="">전체</option>
+                                    ${field.values.map(v => `<option value="${v.v}" ${existing?.value === v.v ? 'selected' : ''}>${v.label}</option>`).join('')}
+                                </select>
+                            </div>`;
+                        } else if (field.type === 'number') {
+                            html += `<div class="flex items-center gap-2">
+                                <span class="text-xs text-gray-600 w-20">${field.name}</span>
+                                <select class="form-input text-xs w-16" id="op_${field.id}" oninput="setNumCondition('${node.id}', '${field.id}', this.value, document.getElementById('val_${field.id}').value, '${field.name}', '${field.unit||''}')">
+                                    <option value="">-</option>
+                                    <option value=">" ${existing?.op === '>' ? 'selected' : ''}>초과</option>
+                                    <option value=">=" ${existing?.op === '>=' ? 'selected' : ''}>이상</option>
+                                    <option value="<" ${existing?.op === '<' ? 'selected' : ''}>미만</option>
+                                </select>
+                                <input type="number" class="form-input text-xs w-16" id="val_${field.id}" value="${existing ? (field.unit === 'MB' ? existing.value / 1048576 : existing.value) : ''}" placeholder="값" oninput="setNumCondition('${node.id}', '${field.id}', document.getElementById('op_${field.id}').value, this.value, '${field.name}', '${field.unit||''}')">
+                                <span class="text-xs text-gray-400">${field.unit || ''}</span>
+                            </div>`;
+                        } else if (field.type === 'string') {
+                            html += `<div class="flex items-center gap-2">
+                                <span class="text-xs text-gray-600 w-20">${field.name}</span>
+                                <input type="text" class="form-input text-xs flex-1" value="${existing?.value || ''}" placeholder="포함 문자열" oninput="setCondition('${node.id}', '${field.id}', 'contains', this.value, '${field.name}')">
+                            </div>`;
+                        }
+                    });
+                    
+                    html += `</div></div>`;
+                }
+            } else if (node.type === 'action') {
+                const ruleType = document.getElementById('builderRuleType').value;
+                
+                if (ruleType === 'cep') {
+                    html += `
+                        <div>
+                            <label class="form-label">심각도</label>
+                            <select class="form-input text-sm" oninput="updateNodeData('${node.id}', 'severity', this.value)">
+                                <option value="CRITICAL" ${node.data.severity === 'CRITICAL' ? 'selected' : ''}>🔴 긴급 (CRITICAL)</option>
+                                <option value="HIGH" ${node.data.severity === 'HIGH' ? 'selected' : ''}>🟠 높음 (HIGH)</option>
+                                <option value="MEDIUM" ${node.data.severity === 'MEDIUM' ? 'selected' : ''}>🟡 보통 (MEDIUM)</option>
+                                <option value="LOW" ${node.data.severity === 'LOW' ? 'selected' : ''}>🟢 낮음 (LOW)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label">알림 메시지</label>
+                            <textarea class="form-input text-sm" rows="2" oninput="updateNodeData('${node.id}', 'message', this.value)">${node.data.message}</textarea>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div>
+                            <label class="form-label">위험도 가중치</label>
+                            <input type="number" class="form-input text-sm" value="${node.data.score}" min="1" max="20" oninput="updateNodeData('${node.id}', 'score', parseInt(this.value))">
+                            <p class="text-xs text-gray-400 mt-1">1~20 (높을수록 위험도 기여 증가)</p>
+                        </div>
+                        <div>
+                            <label class="form-label">설명</label>
+                            <textarea class="form-input text-sm" rows="2" oninput="updateNodeData('${node.id}', 'message', this.value)">${node.data.message}</textarea>
+                        </div>
+                    `;
+                }
+            }
+            
+            html += `</div>`;
+            panel.innerHTML = html;
+        }
+        
+        function setCondition(nodeId, field, op, value, label) {
+            const node = nodes.find(n => n.id === nodeId);
+            if (!node) return;
+            
+            // 기존 조건 제거
+            node.data.conditions = node.data.conditions.filter(c => c.field !== field);
+            
+            // 값이 있으면 추가
+            if (value) {
+                node.data.conditions.push({field, op, value, label});
+            }
+            renderCanvas();
+            updateSqlPreview();
+        }
+        
+        function setNumCondition(nodeId, field, op, value, label, unit) {
+            const node = nodes.find(n => n.id === nodeId);
+            if (!node) return;
+            
+            node.data.conditions = node.data.conditions.filter(c => c.field !== field);
+            
+            if (op && value) {
+                let numVal = parseFloat(value);
+                if (unit === 'MB') numVal *= 1048576;
+                node.data.conditions.push({field, op, value: numVal, label, unit});
+            }
+            renderCanvas();
+            updateSqlPreview();
+        }
+        
+        function updateNodeData(nodeId, key, value) {
+            const node = nodes.find(n => n.id === nodeId);
+            if (node) {
+                node.data[key] = value;
+                if (key === 'msgId') node.data.conditions = []; // 이벤트 변경시 조건 초기화
+                renderCanvas();
+                showProps(node);
+                updateSqlPreview();
+            }
+        }
+        
+        function updateSqlPreview() {
+            const eventNodes = nodes.filter(n => n.type === 'event');
+            const actionNode = nodes.find(n => n.type === 'action');
+            
+            if (eventNodes.length === 0) {
+                document.getElementById('sqlPreview').textContent = '-- 이벤트 노드를 추가하세요';
+                return;
+            }
+            
+            let sql = '';
+            
+            // 연결 순서대로 이벤트 정렬
+            const eventIds = eventNodes.map(n => n.id);
+            const eventEdges = edges.filter(e => eventIds.includes(e.from) && eventIds.includes(e.to));
+            
+            // 연결된 순서대로 정렬
+            let orderedEvents = [];
+            if (eventEdges.length > 0) {
+                // 시작점 찾기 (들어오는 edge가 없는 노드)
+                const targets = new Set(eventEdges.map(e => e.to));
+                let current = eventNodes.find(n => !targets.has(n.id));
+                if (!current) current = eventNodes[0];
+                
+                orderedEvents.push(current);
+                while (orderedEvents.length < eventNodes.length) {
+                    const nextEdge = eventEdges.find(e => e.from === current.id);
+                    if (!nextEdge) break;
+                    const nextNode = eventNodes.find(n => n.id === nextEdge.to);
+                    if (!nextNode || orderedEvents.includes(nextNode)) break;
+                    orderedEvents.push(nextNode);
+                    current = nextNode;
+                }
+            } else {
+                orderedEvents = eventNodes;
+            }
+            
+            const ts = mapField('rt');
+            const uid = mapField('suid');
+            
+            if (eventNodes.length === 1) {
+                const ev = eventNodes[0];
+                const where = buildWhere(ev, '');
+                
+                if (ev.data.window && ev.data.count > 1) {
+                    // 윈도우 + 횟수 조건
+                    const w = parseWindow(ev.data.window);
+                    sql = `SELECT ${uid}, COUNT(*) as cnt\nFROM events\nWHERE ${where.join(' AND ')}\nGROUP BY ${uid}, TUMBLE(${ts}, INTERVAL '${w.val}' ${w.unit})\nHAVING COUNT(*) >= ${ev.data.count}`;
+                } else if (ev.data.window) {
+                    // 윈도우만 (횟수 1 = 해당 윈도우 내 발생 여부)
+                    const w = parseWindow(ev.data.window);
+                    sql = `SELECT ${uid}, COUNT(*) as cnt\nFROM events\nWHERE ${where.join(' AND ')}\nGROUP BY ${uid}, TUMBLE(${ts}, INTERVAL '${w.val}' ${w.unit})\nHAVING COUNT(*) >= 1`;
+                } else {
+                    sql = `SELECT * FROM events\nWHERE ${where.join('\n  AND ')}`;
+                }
+            } else if (orderedEvents.length >= 2 && eventEdges.length > 0) {
+                // N개 이벤트 시퀀스
+                const hasCountCondition = orderedEvents.some(ev => ev.data.count > 1);
+                
+                if (hasCountCondition) {
+                    // JOIN 방식 (횟수 조건 있을 때)
+                    sql = buildJoinSql(orderedEvents, eventEdges);
+                } else {
+                    // MATCH_RECOGNIZE 방식 (단순 시퀀스)
+                    sql = buildMatchRecognizeSql(orderedEvents, eventEdges);
+                }
+            } else if (eventNodes.length >= 2) {
+                sql = `-- 이벤트 노드들을 서로 연결하세요 (${eventNodes.length}개 이벤트)`;
+            }
+            
+            if (actionNode) {
+                sql += `\n\n-- Action: ${actionNode.data.severity}, UEBA +${actionNode.data.score}점, "${actionNode.data.message}"`;
+            }
+            
+            document.getElementById('sqlPreview').textContent = sql;
+        }
+        
+        function buildWhere(ev, alias) {
+            const prefix = alias ? alias + '.' : '';
+            const where = [`${prefix}${mapField('msgid')} = '${ev.data.msgId}'`];
+            ev.data.conditions.forEach(c => {
+                const field = mapField(c.field);
+                where.push(`${prefix}${field} ${c.op} ${typeof c.value === 'string' ? `'${c.value}'` : c.value}`);
+            });
+            return where;
+        }
+        
+        function buildJoinSql(orderedEvents, eventEdges) {
+            const aliases = orderedEvents.map((_, i) => String.fromCharCode(97 + i)); // a, b, c, ...
+            const evNames = orderedEvents.map(ev => eventTypes.find(e => e.id === ev.data.msgId)?.name || ev.data.msgId);
+            const ts = mapField('rt');
+            const uid = mapField('suid');
+            
+            // 주석
+            let sql = `-- 시퀀스: ${evNames.join(' → ')}\n`;
+            sql += `SELECT\n  ${aliases[0]}.${uid}`;
+            
+            orderedEvents.forEach((ev, i) => {
+                sql += `,\n  ${aliases[i]}.${ts} AS event${i+1}_time`;
+                if (ev.data.count > 1) {
+                    sql += `,\n  COUNT(DISTINCT ${aliases[i]}.${ts}) AS event${i+1}_count`;
+                }
+            });
+            
+            sql += `\nFROM events ${aliases[0]}`;
+            
+            // JOIN 절
+            for (let i = 1; i < orderedEvents.length; i++) {
+                const edge = eventEdges.find(e => e.from === orderedEvents[i-1].id && e.to === orderedEvents[i].id);
+                const w = parseWindow(edge?.within || '10m');
+                
+                sql += `\nJOIN events ${aliases[i]} ON ${aliases[0]}.${uid} = ${aliases[i]}.${uid}`;
+                sql += `\n  AND ${aliases[i]}.${ts} > ${aliases[i-1]}.${ts}`;
+                sql += `\n  AND ${aliases[i]}.${ts} <= ${aliases[i-1]}.${ts} + INTERVAL '${w.val}' ${w.unit}`;
+            }
+            
+            // WHERE 절
+            sql += `\nWHERE `;
+            const whereClauses = [];
+            orderedEvents.forEach((ev, i) => {
+                whereClauses.push(...buildWhere(ev, aliases[i]));
+            });
+            sql += whereClauses.join('\n  AND ');
+            
+            // GROUP BY
+            sql += `\nGROUP BY ${aliases[0]}.${uid}`;
+            orderedEvents.forEach((ev, i) => {
+                if (ev.data.count <= 1) {
+                    sql += `, ${aliases[i]}.${ts}`;
+                }
+            });
+            
+            // HAVING (횟수 조건)
+            const havingClauses = [];
+            orderedEvents.forEach((ev, i) => {
+                if (ev.data.count > 1) {
+                    havingClauses.push(`COUNT(DISTINCT ${aliases[i]}.${ts}) >= ${ev.data.count}`);
+                }
+            });
+            if (havingClauses.length > 0) {
+                sql += `\nHAVING ${havingClauses.join(' AND ')}`;
+            }
+            
+            return sql;
+        }
+        
+        function buildMatchRecognizeSql(orderedEvents, eventEdges) {
+            const edge = eventEdges[0];
+            const w = parseWindow(edge?.within || '10m');
+            const ts = mapField('rt');
+            const uid = mapField('suid');
+            
+            let sql = `SELECT * FROM events\nMATCH_RECOGNIZE (\n  PARTITION BY ${uid}\n  ORDER BY ${ts}\n  MEASURES\n`;
+            orderedEvents.forEach((ev, i) => {
+                sql += `    ${String.fromCharCode(65+i)}.${ts} AS event${i+1}_time${i < orderedEvents.length-1 ? ',' : ''}\n`;
+            });
+            sql += `  PATTERN (${orderedEvents.map((_, i) => String.fromCharCode(65+i)).join(' ')}) WITHIN INTERVAL '${w.val}' ${w.unit}\n  DEFINE\n`;
+            orderedEvents.forEach((ev, i) => {
+                const conds = buildWhere(ev, String.fromCharCode(65+i));
+                sql += `    ${String.fromCharCode(65+i)} AS ${conds.join(' AND ')}${i < orderedEvents.length-1 ? ',' : ''}\n`;
+            });
+            sql += `)`;
+            return sql;
+        }
+        
+        async function testRule() {
+            const sql = document.getElementById('sqlPreview').textContent;
+            
+            if (sql.startsWith('--') && !sql.includes('SELECT')) {
+                alert('❌ 유효하지 않음\n\n이벤트 노드를 추가하고 연결하세요.');
+                return;
+            }
+            
+            // 기본 문법 체크
+            const errors = [];
+            
+            if (!sql.includes('SELECT')) errors.push('SELECT 문이 없습니다');
+            if (!sql.includes('FROM events')) errors.push('FROM events가 없습니다');
+            if (sql.includes('MATCH_RECOGNIZE')) {
+                if (!sql.includes('PARTITION BY')) errors.push('PARTITION BY가 없습니다');
+                if (!sql.includes('PATTERN')) errors.push('PATTERN이 없습니다');
+                if (!sql.includes('DEFINE')) errors.push('DEFINE이 없습니다');
+            }
+            if (sql.includes('JOIN') && !sql.includes('ON')) errors.push('JOIN에 ON 조건이 없습니다');
+            
+            // 괄호 짝 체크
+            const openParen = (sql.match(/\(/g) || []).length;
+            const closeParen = (sql.match(/\)/g) || []).length;
+            if (openParen !== closeParen) errors.push(`괄호 불일치: ( ${openParen}개, ) ${closeParen}개`);
+            
+            // NaN, undefined, null 체크
+            if (sql.includes('NaN')) errors.push('잘못된 숫자값 (NaN) - 집계 시간을 확인하세요');
+            if (sql.includes('undefined')) errors.push('정의되지 않은 값 (undefined)');
+            if (sql.includes("'null'") || sql.match(/= null[^a-z]/)) errors.push('null 값이 포함됨');
+            
+            // INTERVAL 값 체크
+            const intervalMatch = sql.match(/INTERVAL '(\d+)'/g);
+            if (intervalMatch) {
+                intervalMatch.forEach(m => {
+                    const val = parseInt(m.match(/\d+/)[0]);
+                    if (val <= 0 || val > 1440) errors.push(`잘못된 시간 간격: ${m}`);
+                });
+            }
+            
+            if (errors.length > 0) {
+                alert('❌ 문법 오류\n\n' + errors.join('\n'));
+                return;
+            }
+            
+            // Flink EXPLAIN 호출
+            const cleanSql = sql.split('\n').filter(line => !line.startsWith('--')).join('\n').trim();
+            
+            try {
+                const res = await fetch('/api/flink/explain', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({sql: cleanSql})
+                });
+                
+                const result = await res.json();
+                
+                if (result.valid) {
+                    copyToClipboard(cleanSql);
+                    alert('✅ Flink 검증 통과!\n\n클립보드에 복사되었습니다.');
+                } else {
+                    alert('❌ Flink 검증 실패\n\n' + (result.error || '알 수 없는 오류'));
+                }
+            } catch (e) {
+                // Flink 연결 실패 시 기본 검증만 통과
+                copyToClipboard(cleanSql);
+                alert('✅ 문법 검증 통과!\n\n(Flink 연결 불가 - 기본 검증만 수행)\n\n클립보드에 복사되었습니다.');
+            }
+        }
+        
+        function copyToClipboard(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text);
+            } else {
+                // fallback
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+        }
+        
+        async function saveRule() {
+            const name = document.getElementById('builderRuleName').value.trim();
+            const ruleType = document.getElementById('builderRuleType').value;
+            
+            if (!name) { alert('규칙 이름을 입력하세요'); return; }
+            if (nodes.length === 0) { alert('노드를 추가하세요'); return; }
+            
+            // 규칙명 중복 체크
+            const ruleId = name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9가-힣_-]/g, '');
+            if (rulesData[ruleId]) {
+                alert('❌ 이미 존재하는 규칙명입니다.\n\n다른 이름을 사용하세요.');
+                return;
+            }
+            
+            const actionNode = nodes.find(n => n.type === 'action');
+            const eventNodes = nodes.filter(n => n.type === 'event');
+            
+            if (eventNodes.length === 0) { alert('이벤트 노드를 추가하세요'); return; }
+            if (!actionNode) { alert('액션 노드를 추가하세요'); return; }
+            
+            const firstEvent = eventNodes[0];
+            
+            // patterns 구조로 변환
+            const orderedEvents = [];
+            if (edges.length > 0 && eventNodes.length >= 2) {
+                // 연결선 순서대로 정렬
+                let current = eventNodes.find(n => !edges.some(e => e.to === n.id));
+                let order = 1;
+                while (current) {
+                    orderedEvents.push({node: current, order: order++});
+                    const edge = edges.find(e => e.from === current.id);
+                    current = edge ? eventNodes.find(n => n.id === edge.to) : null;
+                }
+            } else {
+                eventNodes.forEach((n, i) => orderedEvents.push({node: n, order: i + 1}));
+            }
+            
+            const patterns = orderedEvents.map(({node, order}) => {
+                const p = {
+                    match: {
+                        msgId: node.data.msgId,
+                        conditions: node.data.conditions.map(c => ({
+                            field: c.field,
+                            op: c.op === '=' ? 'eq' : c.op === '>' ? 'gt' : c.op === '>=' ? 'gte' : c.op === '<' ? 'lt' : c.op,
+                            value: c.value
+                        }))
+                    }
+                };
+                if (eventNodes.length >= 2) p.order = order;
+                if (node.data.count > 1) p.quantifier = {min: node.data.count};
+                return p;
+            });
+            
+            const rule = {
+                name: name,
+                severity: actionNode.data.severity,
+                description: actionNode.data.message,
+                enabled: true,
+                patterns: patterns,
+                by: ['userId'],
+                sql: document.getElementById('sqlPreview').textContent
+            };
+            
+            // 윈도우/집계 설정
+            if (eventNodes.length >= 2) {
+                const edge = edges[0];
+                rule.within = edge?.within || firstEvent.data.window || '10m';
+            } else if (firstEvent.data.window && firstEvent.data.count > 1) {
+                rule.aggregate = {count: {min: firstEvent.data.count}, within: firstEvent.data.window};
+            } else if (firstEvent.data.window) {
+                rule.within = firstEvent.data.window;
+            }
+            
+            try {
+                const res = await fetch('/api/cep/rules', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(rule)
+                });
+                
+                if (res.ok) {
+                    alert(`✅ CEP 규칙이 저장되었습니다!\n\nID: ${ruleId}`);
+                    closeBuilder();
+                    location.reload();
+                } else {
+                    const err = await res.text();
+                    alert('❌ 저장 실패: ' + err);
+                }
+            } catch (e) {
+                alert('❌ 저장 오류: ' + e.message);
+            }
+        }
+        // ========== 마이그레이션 ==========
+        let migMeta = {events: {}};  // 현재 메타데이터
+        let migAnalysis = {};        // analyze 결과
+        let migSelectedEvent = null;
+
+        function openMigration() {
+            document.getElementById('migrationModal').classList.add('show');
+            // 기존 메타데이터 로드
+            fetch('/api/cep/field-meta').then(r=>r.json()).then(data => {
+                migMeta = data || {events:{}};
+                if (migMeta.migratedAt) {
+                    document.getElementById('migLastDate').textContent = '최근: ' + new Date(migMeta.migratedAt).toLocaleString('ko-KR');
+                }
+                // 기존 데이터가 있으면 이벤트 목록 바로 표시
+                const evKeys = Object.keys(migMeta.events || {});
+                if (evKeys.length > 0) {
+                    // 기존 데이터를 migAnalysis에도 반영 (필드 목록용)
+                    evKeys.forEach(evId => {
+                        if (!migAnalysis[evId]) {
+                            migAnalysis[evId] = { fields: Object.keys(migMeta.events[evId].fields || {}), sampleCount: 0 };
+                        }
+                    });
+                    renderMigEventList();
+                    document.getElementById('migAnalyzeStatus').textContent = `저장된 데이터: ${evKeys.length}개 이벤트`;
+                }
+            });
+        }
+
+        function closeMigration() {
+            document.getElementById('migrationModal').classList.remove('show');
+        }
+
+        // 상위 마이그레이션: N일치 이벤트 분석
+        async function runAnalyze() {
+            const days = parseInt(document.getElementById('migDays').value) || 7;
+            const mode = document.getElementById('migMode').value;
+            const list = document.getElementById('migEventList');
+            const status = document.getElementById('migAnalyzeStatus');
+            list.innerHTML = '<div class="text-center text-gray-400 text-sm py-4">분석 중...</div>';
+            status.textContent = '분석 중...';
+
+            // 덮어쓰기 모드면 기존 데이터 초기화
+            if (mode === 'overwrite') {
+                migMeta = {events: {}};
+            }
+
+            const res = await fetch('/api/cep/field-meta/analyze', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({days})
+            });
+            const data = await res.json();
+            migAnalysis = data.events || {};
+
+            status.textContent = `${days}일치 · ${Object.keys(migAnalysis).length}개 이벤트 · ${mode === 'merge' ? '병합 모드' : '덮어쓰기 모드'}`;
+            renderMigEventList();
+        }
+
+        // 이벤트 목록 렌더링 (공통)
+        function renderMigEventList() {
+            const list = document.getElementById('migEventList');
+            list.innerHTML = '';
+            const allEvents = new Set([...Object.keys(migAnalysis), ...Object.keys(migMeta.events || {})]);
+            if (allEvents.size === 0) {
+                list.innerHTML = '<div class="text-center text-gray-400 text-sm py-8">분석을 실행하세요</div>';
+                return;
+            }
+            const sorted = [...allEvents].sort((a,b) => {
+                const ca = migAnalysis[a]?.sampleCount || 0, cb = migAnalysis[b]?.sampleCount || 0;
+                return cb - ca;
+            });
+            sorted.forEach(evId => {
+                const hasConfig = !!migMeta.events?.[evId];
+                const enabled = hasConfig ? migMeta.events[evId].enabled !== false : false;
+                const fieldCount = hasConfig ? Object.keys(migMeta.events[evId].fields || {}).length : 0;
+                const count = migAnalysis[evId]?.sampleCount || 0;
+                const isSelected = migSelectedEvent === evId;
+                const btn = document.createElement('div');
+
+                if (enabled) {
+                    btn.className = `px-3 py-2 rounded cursor-pointer text-sm flex justify-between items-center bg-green-50 border border-green-200 ${isSelected ? 'ring-2 ring-blue-400' : ''}`;
+                    const badge = fieldCount > 0
+                        ? `<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">${fieldCount}필드</span>`
+                        : `<span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">설정 필요</span>`;
+                    btn.innerHTML = `<div class="flex items-center gap-2">
+                        <input type="checkbox" checked onclick="event.stopPropagation(); toggleEventEnabled('${evId}', this.checked)" class="accent-green-600 w-4 h-4">
+                        <span class="font-medium text-green-800">${evId.replace('MESSAGE_','')}</span>
+                    </div>${badge}`;
+                } else {
+                    btn.className = `px-3 py-2 rounded cursor-pointer text-sm flex justify-between items-center border border-dashed border-gray-300 hover:bg-gray-50 ${isSelected ? 'ring-2 ring-blue-400' : ''}`;
+                    btn.innerHTML = `<div class="flex items-center gap-2">
+                        <input type="checkbox" onclick="event.stopPropagation(); toggleEventEnabled('${evId}', this.checked)" class="accent-gray-400 w-4 h-4">
+                        <span class="text-gray-500">${evId.replace('MESSAGE_','')}</span>
+                    </div><span class="text-xs text-gray-400">${count ? count.toLocaleString()+'건' : '미설정'}</span>`;
+                }
+                btn.onclick = (e) => {
+                    if (e.target.tagName !== 'INPUT') selectMigEvent(evId);
+                };
+                list.appendChild(btn);
+            });
+        }
+
+        function toggleEventEnabled(evId, checked) {
+            if (!migMeta.events) migMeta.events = {};
+            if (!migMeta.events[evId]) {
+                migMeta.events[evId] = {label: '', enabled: checked, fields: {}};
+                if (migAnalysis[evId]) {
+                    migAnalysis[evId].fields.forEach(f => {
+                        migMeta.events[evId].fields[f] = {};
+                    });
+                }
+            } else {
+                migMeta.events[evId].enabled = checked;
+            }
+            requestAnimationFrame(renderMigEventList);
+        }
+        function selectMigEvent(evId) {
+            migSelectedEvent = evId;
+            // 좌측 하이라이트
+            document.querySelectorAll('#migEventList > div').forEach(el => {
+                el.classList.toggle('bg-blue-100', el.textContent.includes(evId.replace('MESSAGE_','')));
+            });
+
+            const area = document.getElementById('migFieldArea');
+            const analysis = migAnalysis[evId] || {fields:[]};
+            const existing = migMeta.events?.[evId] || {};
+
+            // 가상 필드 정의 (이벤트 발생 시각 기준, inputType 고정)
+            const virtualFields = [
+                {field: 'time', fixedType: 'time_range', defaultLabel: '발생 시간대'},
+                {field: 'dayOfWeek', fixedType: 'dayOfWeek', defaultLabel: '발생 요일'}
+            ];
+
+            // 필드 카드 렌더 함수
+            function renderFieldCard(field, fm, vf) {
+                const isVirtual = !!vf;
+                const isConfigured = !!fm.inputType;
+                const borderClass = isVirtual
+                    ? (isConfigured ? 'border-blue-200 bg-blue-50/30' : 'border-blue-100 bg-blue-50/10')
+                    : (isConfigured ? 'border-green-200 bg-green-50/30' : 'border-gray-200 bg-white');
+                const codeClass = isVirtual
+                    ? 'bg-blue-100 text-blue-800'
+                    : (isConfigured ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600');
+                // 가상 필드: 체크 + 라벨만. 일반 필드: 전체 UI
+                if (isVirtual) {
+                    const vAttr = ` data-virtual="true" data-fixed-type="${vf.fixedType}"`;
+                    return `<div class="border rounded-lg p-3 ${borderClass}" data-field="${field}"${vAttr}>
+                        <div class="flex items-center gap-3 flex-nowrap">
+                            <input type="checkbox" class="mig-virtual-chk accent-blue-600 w-4 h-4" ${isConfigured?'checked':''} onchange="toggleVirtualField(this, '${field}', '${vf.fixedType}')">
+                            <code class="text-xs ${codeClass} px-2 py-1 rounded font-mono w-36 shrink-0">${field}</code>
+                            <input type="text" class="form-input text-sm flex-1 min-w-[120px] mig-field-label" value="${fm.label || ''}" placeholder="한글 라벨">
+                            <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded shrink-0">${vf.fixedType}</span>
+                            <input type="hidden" class="mig-field-type" value="${fm.inputType || ''}">
+                        </div>
+                    </div>`;
+                }
+
+                const rawOps = fm.operators || (fm.inputType ? defaultOperators[fm.inputType] : []);
+                const activeOps = new Set(rawOps.map(o => typeof o === 'string' ? o : o.op));
+                const opsCheckboxes = fm.inputType ? renderOpsCheckboxes(field, activeOps) : '';
+                const statusBadge = isConfigured
+                    ? `<span class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap mig-status-badge">✓ ${fm.inputType}</span>`
+                    : `<span class="text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap mig-status-badge">미설정</span>`;
+                let extraArea = renderOptionsArea(field, fm);
+                if (fm.inputType === 'number') {
+                    extraArea += `<div class="mt-2 flex items-center gap-2">
+                        <span class="text-xs text-gray-500">단위:</span>
+                        <input type="text" class="form-input text-xs w-24 mig-field-unit" value="${fm.unit || ''}" placeholder="예: bytes, 장, 건">
+                    </div>`;
+                }
+                return `<div class="border rounded-lg p-3 ${borderClass}" data-field="${field}">
+                    <div class="flex items-center gap-3 mb-2 flex-nowrap">
+                        <code class="text-xs ${codeClass} px-2 py-1 rounded font-mono w-36 shrink-0 truncate" title="${field}">${field}</code>
+                        ${statusBadge}
+                        <input type="text" class="form-input text-sm flex-1 min-w-[120px] mig-field-label" value="${fm.label || ''}" placeholder="한글 라벨">
+                        <select class="form-input text-sm w-48 shrink-0 mig-field-type" onchange="onInputTypeChange(this, '${evId}', '${field}')">
+                            <option value="">미설정</option>
+                            <option value="select" ${fm.inputType==='select'?'selected':''}>select (드롭다운)</option>
+                            <option value="checkbox" ${fm.inputType==='checkbox'?'selected':''}>checkbox (다중선택)</option>
+                            <option value="input" ${fm.inputType==='input'?'selected':''}>input (자유입력)</option>
+                            <option value="number" ${fm.inputType==='number'?'selected':''}>number (숫자)</option>
+                            <option value="time_range" ${fm.inputType==='time_range'?'selected':''}>time_range (시간범위)</option>
+                            <option value="dayOfWeek" ${fm.inputType==='dayOfWeek'?'selected':''}>dayOfWeek (요일)</option>
+                        </select>
+                    </div>
+                    ${opsCheckboxes ? `<div class="mb-2 mig-ops-area">${opsCheckboxes}</div>` : `<div class="mb-2 mig-ops-area"></div>`}
+                    ${fm.inputType ? `<div class="mb-2 flex items-center gap-2">
+                        <span class="text-xs text-gray-500 shrink-0">값 형식:</span>
+                        <code class="text-xs bg-yellow-50 text-yellow-800 border border-yellow-200 px-1.5 py-0.5 rounded mig-vf-example">${(fm.valueFormat || defaultValueFormats[fm.inputType] || {}).example || ''}</code>
+                        <input type="text" class="form-input text-xs flex-1 mig-vf-desc" value="${(fm.valueFormat || defaultValueFormats[fm.inputType] || {}).desc || ''}" placeholder="값 형식 설명">
+                    </div>` : ''}
+                    <div class="mig-options-area" id="opts_${field}">
+                        ${extraArea}
+                    </div>
+                </div>`;
+            }
+
+            // ── 공통 조건 (위) ──
+            let html = `<div class="mb-4">
+                <label class="form-label">이벤트 한글명</label>
+                <input type="text" id="migEvLabel" class="form-input text-sm" value="${existing.label || ''}" placeholder="예: 장치 사용">
+            </div>
+            <h4 class="font-semibold text-sm mb-3 text-blue-700">⏰ 공통 조건 (이벤트 발생 시각)</h4>
+            <div class="space-y-3" id="migVirtualFields">`;
+            virtualFields.forEach(vf => {
+                const fm = existing.fields?.[vf.field] || {label: vf.defaultLabel};
+                if (!fm.label) fm.label = vf.defaultLabel;
+                html += renderFieldCard(vf.field, fm, vf);
+            });
+
+            // ── 속성 필드 (아래) ──
+            html += `</div>
+            <h4 class="font-semibold text-sm mt-5 mb-3">필드 목록 (${analysis.fields.length}개)</h4>
+            <div class="space-y-3" id="migFieldList">`;
+            analysis.fields.forEach(field => {
+                const fm = existing.fields?.[field] || {};
+                html += renderFieldCard(field, fm, null);
+            });
+
+            html += '</div>';
+            area.innerHTML = html;
+        }
+
+        // 연산자 체크박스 렌더링
+        function renderOpsCheckboxes(field, activeOps) {
+            return `<div class="flex flex-wrap gap-1 items-center">
+                <span class="text-xs text-gray-500 mr-1">연산자:</span>
+                ${allOperators.map(op => `<label class="inline-flex items-center gap-0.5 text-xs cursor-pointer select-none">
+                    <input type="checkbox" class="mig-op-chk" data-op="${op}" ${activeOps.has(op)?'checked':''}>
+                    <span class="${activeOps.has(op)?'text-blue-600 font-medium':'text-gray-400'}">${operatorLabels[op]||op}</span>
+                </label>`).join('')}
+            </div>`;
+        }
+
+        function renderOptionsArea(field, fm) {
+            if (!fm.inputType || fm.inputType === 'input' || fm.inputType === 'number') return '';
+            if (fm.inputType === 'select' || fm.inputType === 'checkbox') {
+                const opts = fm.options || [];
+                let h = `<div class="mt-2 space-y-1">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-gray-500">옵션 목록</span>
+                        <button onclick="analyzeFieldValues('${migSelectedEvent}','${field}')" class="text-xs px-2 py-1 rounded" style="background:#3b82f6;color:white">🔍 값 수집</button>
+                    </div>
+                    <div class="mig-opts-list space-y-1">`;
+                opts.forEach((o, i) => {
+                    h += `<div class="flex gap-2 items-center">
+                        <code class="text-xs bg-gray-50 px-2 py-0.5 w-44 truncate" title="${o.value}">${o.value}</code>
+                        <input type="text" class="form-input text-xs flex-1 mig-opt-label" data-idx="${i}" value="${o.label || ''}" placeholder="한글 라벨">
+                        <button onclick="this.closest('div').remove()" class="text-red-400 text-xs">✕</button>
+                    </div>`;
+                });
+                h += '</div></div>';
+                return h;
+            }
+            if (fm.inputType === 'time_range') {
+                return `<div class="mt-2 text-xs text-gray-500">
+                    규칙 작성 시 시작/종료 시각(0~23)을 입력받습니다. 야간 wrap(예: 22~6) 자동 지원.
+                </div>`;
+            }
+            if (fm.inputType === 'dayOfWeek') {
+                const days = ['일','월','화','수','목','금','토'];
+                const opts = fm.options || days.map((d,i) => ({value: String(i+1), label: d}));
+                let h = `<div class="mt-2 space-y-1">
+                    <span class="text-xs text-gray-500">요일 옵션 (value: 1=일~7=토)</span>
+                    <div class="mig-opts-list space-y-1">`;
+                opts.forEach((o,i) => {
+                    h += `<div class="flex gap-2 items-center">
+                        <code class="text-xs bg-gray-50 px-2 py-0.5 w-44">${o.value}</code>
+                        <input type="text" class="form-input text-xs flex-1 mig-opt-label" data-idx="${i}" value="${o.label || ''}" placeholder="라벨">
+                        <button onclick="this.closest('div').remove()" class="text-red-400 text-xs">✕</button>
+                    </div>`;
+                });
+                h += '</div></div>';
+                return h;
+            }
+            return '';
+        }
+
+        // inputType별 기본 operators
+        const defaultOperators = {
+            'select':     ['eq', 'neq'],
+            'checkbox':   ['in'],
+            'input':      ['eq', 'neq', 'like', 'regex'],
+            'number':     ['eq', 'gt', 'gte', 'lt', 'lte'],
+            'time_range': ['time_range'],
+            'dayOfWeek':  ['in']
+        };
+        // inputType별 기본 valueFormat
+        const defaultValueFormats = {
+            'select':     {type:'string',   example:'"removable"',        desc:'옵션 중 단일 선택'},
+            'checkbox':   {type:'string[]', example:'["a","b"]',          desc:'옵션 중 복수 선택 배열'},
+            'input':      {type:'string',   example:'"텍스트"',            desc:'자유 입력 문자열'},
+            'number':     {type:'number',   example:'1024',               desc:'숫자'},
+            'time_range': {type:'object',   example:'{"start":22,"end":6}', desc:'시작/종료 시각 (0~23시, 야간 wrap 지원)', schema:{start:'number(0-23)',end:'number(0-23)'}},
+            'dayOfWeek':  {type:'number[]', example:'[1,7]',              desc:'요일 번호 배열 (1=일 ~ 7=토)'}
+        };
+        // 전체 연산자 목록 (체크박스 편집용)
+        const allOperators = ['eq','neq','gt','gte','lt','lte','in','like','regex','time_range'];
+        const operatorLabels = {
+            'eq': '일치 (=)', 'neq': '불일치 (≠)', 'gt': '초과 (>)', 'gte': '이상 (≥)',
+            'lt': '미만 (<)', 'lte': '이하 (≤)', 'in': '포함 (in)', 'like': '패턴 (like)',
+            'regex': '정규식', 'time_range': '시간범위'
+        };
+
+        // 가상 필드 체크박스 토글
+        function toggleVirtualField(chk, field, fixedType) {
+            const card = chk.closest('div[data-field]');
+            const hidden = card.querySelector('input.mig-field-type');
+            hidden.value = chk.checked ? fixedType : '';
+        }
+
+        function onInputTypeChange(sel, evId, field) {
+            const type = sel.value;
+            const card = sel.closest('div[data-field]');
+            const optsArea = document.getElementById('opts_' + field);
+
+            // 연산자 체크박스 갱신
+            const opsArea = card.querySelector('.mig-ops-area');
+            if (opsArea) {
+                if (type) {
+                    const activeOps = new Set(defaultOperators[type] || []);
+                    opsArea.innerHTML = renderOpsCheckboxes(field, activeOps);
+                } else {
+                    opsArea.innerHTML = '';
+                }
+            }
+
+            // 상태 뱃지 갱신
+            const badge = card.querySelector('.mig-status-badge');
+            if (badge) {
+                if (type) {
+                    badge.className = 'text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap mig-status-badge';
+                    badge.textContent = '✓ ' + type;
+                } else {
+                    badge.className = 'text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap mig-status-badge';
+                    badge.textContent = '미설정';
+                }
+            }
+
+            // 옵션 영역
+            optsArea.innerHTML = renderOptionsArea(field, {inputType: type, options: []});
+            if (type === 'number') {
+                const existing = migMeta.events?.[migSelectedEvent]?.fields?.[field] || {};
+                optsArea.innerHTML += `<div class="mt-2 flex items-center gap-2">
+                    <span class="text-xs text-gray-500">단위 (선택):</span>
+                    <input type="text" class="form-input text-xs w-24 mig-field-unit" value="${existing.unit || ''}" placeholder="예: bytes, 장">
+                </div>`;
+            }
+
+            // valueFormat 갱신
+            let vfRow = card.querySelector('.mig-vf-example')?.closest('div');
+            if (type) {
+                const vf = defaultValueFormats[type] || {};
+                const vfHtml = `<div class="mb-2 flex items-center gap-2">
+                    <span class="text-xs text-gray-500 shrink-0">값 형식:</span>
+                    <code class="text-xs bg-yellow-50 text-yellow-800 border border-yellow-200 px-1.5 py-0.5 rounded mig-vf-example">${vf.example || ''}</code>
+                    <input type="text" class="form-input text-xs flex-1 mig-vf-desc" value="${vf.desc || ''}" placeholder="값 형식 설명">
+                </div>`;
+                if (vfRow) { vfRow.outerHTML = vfHtml; }
+                else { optsArea.insertAdjacentHTML('beforebegin', vfHtml); }
+            } else if (vfRow) {
+                vfRow.remove();
+            }
+        }
+
+        // 하위 마이그레이션: 특정 필드의 고유값 수집
+        async function analyzeFieldValues(evId, field) {
+            const days = parseInt(document.getElementById('migDays').value) || 7;
+            const res = await fetch('/api/cep/field-meta/analyze-field', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({event: evId, field, days})
+            });
+            const data = await res.json();
+            const values = data.values || [];
+
+            const optsArea = document.getElementById('opts_' + field);
+            // 기존 라벨 보존
+            const existingLabels = {};
+            optsArea.querySelectorAll('.mig-opt-label').forEach(inp => {
+                const code = inp.closest('div').querySelector('code');
+                if (code) existingLabels[code.textContent] = inp.value;
+            });
+
+            let h = `<div class="mt-2 space-y-1">
+                <div class="flex justify-between items-center">
+                    <span class="text-xs text-gray-500">옵션 목록 (${values.length}개 수집됨)</span>
+                    <button onclick="analyzeFieldValues('${evId}','${field}')" class="text-xs px-2 py-1 rounded" style="background:#3b82f6;color:white">🔍 값 수집</button>
+                </div>
+                <div class="mig-opts-list space-y-1">`;
+            values.forEach((v, i) => {
+                const label = existingLabels[v.value] || '';
+                h += `<div class="flex gap-2 items-center">
+                    <code class="text-xs bg-gray-50 px-2 py-0.5 w-44 truncate" title="${v.value}">${v.value}</code>
+                    <input type="text" class="form-input text-xs flex-1 mig-opt-label" data-idx="${i}" value="${label}" placeholder="한글 라벨">
+                    <span class="text-xs text-gray-300">${v.count}</span>
+                    <button onclick="this.closest('div').remove()" class="text-red-400 text-xs">✕</button>
+                </div>`;
+            });
+            h += '</div></div>';
+            optsArea.innerHTML = h;
+        }
+
+        // 현재 UI 상태를 migMeta에 반영
+        function collectCurrentEvent() {
+            if (!migSelectedEvent) return;
+            // 이미 설정된 이벤트만 업데이트 (미설정 이벤트를 자동 생성하지 않음)
+            if (!migMeta.events?.[migSelectedEvent]) return;
+            const evLabel = document.getElementById('migEvLabel')?.value || '';
+            const fields = {};
+
+            document.querySelectorAll('#migFieldList > div[data-field], #migVirtualFields > div[data-field]').forEach(div => {
+                const field = div.dataset.field;
+                const label = div.querySelector('.mig-field-label')?.value || '';
+                const inputType = div.querySelector('.mig-field-type')?.value || '';
+                if (!inputType) return;
+
+                const fm = {label, inputType};
+                if (div.dataset.virtual === 'true') {
+                    // 가상 필드: 고정값 자동 설정
+                    fm.virtual = true;
+                    fm.operators = (defaultOperators[inputType] || []).map(op => ({op, label: operatorLabels[op] || op}));
+                    const vf = defaultValueFormats[inputType] || {};
+                    fm.valueFormat = {type: vf.type||'', example: vf.example||'', desc: vf.desc||''};
+                    if (vf.schema) fm.valueFormat.schema = vf.schema;
+                    fields[field] = fm;
+                    return;
+                }
+                if (inputType === 'select' || inputType === 'checkbox' || inputType === 'dayOfWeek') {
+                    fm.options = [];
+                    div.querySelectorAll('.mig-opts-list > div').forEach(row => {
+                        const val = row.querySelector('code')?.textContent || '';
+                        const lbl = row.querySelector('.mig-opt-label')?.value || '';
+                        if (val) fm.options.push({value: val, label: lbl});
+                    });
+                }
+                // operators: 체크박스에서 수집
+                const checkedOps = [];
+                div.querySelectorAll('.mig-op-chk:checked').forEach(chk => {
+                    const op = chk.dataset.op;
+                    checkedOps.push({op, label: operatorLabels[op] || op});
+                });
+                fm.operators = checkedOps.length ? checkedOps : (defaultOperators[inputType] || []).map(op => ({
+                    op, label: operatorLabels[op] || op
+                }));
+                // unit (number)
+                const unitInput = div.querySelector('.mig-field-unit');
+                if (unitInput?.value) fm.unit = unitInput.value;
+                // valueFormat
+                const vfExample = div.querySelector('.mig-vf-example')?.textContent || '';
+                const vfDesc = div.querySelector('.mig-vf-desc')?.value || '';
+                if (vfExample) {
+                    const base = defaultValueFormats[inputType] || {};
+                    fm.valueFormat = {type: (defaultValueFormats[inputType]||{}).type||'', example: vfExample, desc: vfDesc};
+                    if (base.schema) fm.valueFormat.schema = base.schema;
+                }
+                fields[field] = fm;
+            });
+
+            const prev = migMeta.events[migSelectedEvent];
+            prev.label = evLabel;
+            prev.fields = fields;
+        }
+
+        // 저장
+        async function saveMigration() {
+            collectCurrentEvent();
+            migMeta.migratedAt = new Date().toISOString();
+
+            const res = await fetch('/api/cep/field-meta', {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(migMeta)
+            });
+            if (res.ok) {
+                alert('✅ 메타데이터가 저장되었습니다.');
+                document.getElementById('migLastDate').textContent = '최근: ' + new Date().toLocaleString('ko-KR');
+                renderMigEventList();
+            } else {
+                alert('❌ 저장 실패');
+            }
+        }
+
+        // 초기화
+        async function resetMigration() {
+            if (!confirm('모든 메타데이터를 초기화하시겠습니까?')) return;
+            migMeta = {events: {}};
+            migAnalysis = {};
+            migSelectedEvent = null;
+            const res = await fetch('/api/cep/field-meta', {
+                method: 'PUT', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(migMeta)
+            });
+            if (res.ok) {
+                document.getElementById('migEventList').innerHTML = '<div class="text-center text-gray-400 text-sm py-8">분석을 실행하세요</div>';
+                document.getElementById('migFieldArea').innerHTML = '<div class="text-gray-400 text-center mt-20">← 분석 실행 후 이벤트를 선택하세요</div>';
+                document.getElementById('migLastDate').textContent = '';
+                document.getElementById('migAnalyzeStatus').textContent = '';
+                alert('초기화 완료');
+            }
+        }
+
+        // 이벤트 전환 시 현재 상태 저장 + 목록 갱신
+        const origSelectMigEvent = selectMigEvent;
+        selectMigEvent = function(evId) {
+            collectCurrentEvent();
+            origSelectMigEvent(evId);
+            renderMigEventList();
+        };
+    </script>
+</body>
+</html>

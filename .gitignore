@@ -1,0 +1,60 @@
+# Credentials & secrets
+credentials/
+*.pem
+*.ppk
+*.key
+*_token.json
+*_token.txt
+*_secret_*.json
+siem/.credentials
+
+# Reference implementation
+reference/
+
+# Backups & temp
+backup_v1/
+siem/ueba/backup/
+siem/ueba/handover/
+siem/ueba/reference/
+tmp_*.py
+siem-test
+
+# Build artifacts
+*.exe
+*.jar
+*.class
+*.tar
+siem/flink/images/
+siem/flink/jobs/target/
+siem/opensearch/images/
+
+# Old dashboard copy
+siem/dashboard/dashboard/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Go
+vendor/
+
+# AI assistant context
+GEMINI.md
+CLAUDE.md
+
+# Unnecessary docs
+RESTRUCTURE_PLAN.md
+MIGRATION.md
+HANDOVER.md
+siem-restructure-plan.md
+rule_schema_v2.md
+docs/
+siem/cep/CEP_WIKI.md
+siem/cep/HANDOVER.md
+scripts/

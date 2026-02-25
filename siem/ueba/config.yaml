@@ -1,0 +1,14 @@
+server:
+  port: ":48082"
+
+opensearch:
+  url: "http://siem-opensearch:9200"
+
+kafka:
+  bootstrap: "43.202.241.121:44105"
+  group_id: "siem-ueba"
+
+ueba:
+  dashboard_url: "http://siem-dashboard:8501"
+  health_warn_mb: 256
+  health_crit_mb: 512

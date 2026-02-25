@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Logs - SafePC SIEM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .nav-menu { position: relative; }
+        .nav-item { padding: 8px 16px; font-size: 14px; font-weight: 500; border-radius: 8px; transition: all 0.2s; cursor: pointer; color: white; }
+        .nav-item:hover { background: white; color: #1e293b; }
+        .nav-item.active { background: #3b82f6; color: white; }
+        .dropdown { position: absolute; top: 100%; left: 0; margin-top: 4px; background: white; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid #e5e7eb; padding: 4px 0; min-width: 160px; opacity: 0; visibility: hidden; transition: all 0.2s; }
+        .nav-menu:hover .dropdown { opacity: 1; visibility: visible; }
+        .dropdown a { display: block; padding: 8px 16px; font-size: 14px; color: #374151; }
+        .dropdown a:hover { background: #f3f4f6; }
+        .dropdown a.active { background: #eff6ff; color: #1d4ed8; font-weight: 500; }
+        table.dataTable thead th { font-size: 13px; font-weight: 600; color: #374151; background: #f9fafb; border-bottom: 2px solid #e5e7eb; padding: 14px 16px; text-align: left; cursor: pointer; }
+        table.dataTable tbody td { font-size: 12px; padding: 8px 12px; vertical-align: middle; }
+        table.dataTable tbody tr:hover { background: #f9fafb; }
+        .dataTables_wrapper .dataTables_length, .dataTables_wrapper .dataTables_filter { display: none; }
+        .dataTables_wrapper .dataTables_info { font-size: 13px; color: #6b7280; padding: 12px 0; }
+        .dataTables_wrapper .dataTables_paginate { padding: 12px 0; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button { padding: 6px 12px; margin: 0 2px; border-radius: 6px; border: 1px solid #e5e7eb; background: white; color: #374151 !important; font-size: 13px; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button:hover { background: #f3f4f6; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button.current { background: #3b82f6; border-color: #3b82f6; color: white !important; }
+        .custom-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #f3f4f6; }
+        .custom-search input { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 14px; width: 280px; outline: none; }
+        .custom-search input:focus { border-color: #3b82f6; }
+        .custom-select { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #6b7280; }
+        .custom-select select { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 14px; background: white; }
+        a { cursor: pointer; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <nav class="bg-gradient-to-r from-slate-900 to-slate-800 text-white sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold tracking-tight">SafePC <span class="text-blue-400">SIEM</span></a>
+            <div class="flex items-center gap-2">
+                <a href="/" class="nav-item">Dashboard</a>
+                <div class="nav-menu">
+                    <span class="nav-item active">Monitoring ▾</span>
+                    <div class="dropdown">
+                        <a href="/alerts">Alert History</a>
+                        <a href="/logs" class="active">Event Logs</a>
+                    </div>
+                </div>
+                <a href="/users" class="nav-item">User Risk</a>
+                <a href="/rules" class="nav-item">CEP Rules</a>
+                <a href="/settings" class="nav-item">UEBA Settings</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-6 py-5">
+        <div class="bg-white rounded-2xl shadow-sm p-6">
+            <div class="mb-5">
+                <h1 class="text-xl font-bold text-gray-900">Event Logs</h1>
+                <p class="text-sm text-gray-500 mt-1">SafePC 수집 이벤트 로그 (today)</p>
+            </div>
+            <div class="custom-controls">
+                <div class="custom-search">
+                    <input type="text" id="searchInput" placeholder="검색어를 입력하세요">
+                    <select id="msgFilter" class="ml-2 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                        <option value="">전체 이벤트</option>
+                        <option value="MESSAGE_AGENT_AUTHENTICATION">로그인</option>
+                        <option value="MESSAGE_DEVICE_USAGE">장치 사용</option>
+                        <option value="MESSAGE_PROCESS_CONTROL">프로세스 제어</option>
+                        <option value="MESSAGE_CAPTURE_BLOCK">캡처 차단</option>
+                        <option value="MESSAGE_AGENT_STATE">에이전트 상태</option>
+                        <option value="MESSAGE_ASSETS_SOFTWARE">소프트웨어</option>
+                    </select>
+                    <select id="outcomeFilter" class="ml-2 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                        <option value="">전체 결과</option>
+                        <option value="blocked">차단</option>
+                        <option value="allowed">허용</option>
+                    </select>
+                </div>
+                <div class="custom-select">
+                    <span>표시</span>
+                    <select id="pageLength">
+                        <option value="15" selected>15</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                    <span>개씩</span>
+                </div>
+            </div>
+            <table id="logTable" class="w-full">
+                <thead>
+                    <tr>
+                        <th>시간 (KST)</th>
+                        <th>사용자</th>
+                        <th>이벤트 유형</th>
+                        <th>동작</th>
+                        <th>호스트</th>
+                        <th>결과</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            var table = $('#logTable').DataTable({
+                processing: true,
+                serverSide: true,
+                ajax: {
+                    url: '/api/logs',
+                    data: function(d) {
+                        return {
+                            draw: d.draw, start: d.start, length: d.length,
+                            search: d.search.value,
+                            order_col: d.order[0].column, order_dir: d.order[0].dir,
+                            msgId: $('#msgFilter').val(),
+                            outcome: $('#outcomeFilter').val()
+                        };
+                    }
+                },
+                columns: [
+                    { data: 0, render: function(d) { 
+                        if (!d) return '-'; 
+                        var dt = new Date(d); 
+                        var mm = ('0' + (dt.getUTCMonth()+1)).slice(-2);
+                        var dd = ('0' + dt.getUTCDate()).slice(-2);
+                        var h = ('0' + ((dt.getUTCHours()+9)%24)).slice(-2);
+                        var m = ('0' + dt.getUTCMinutes()).slice(-2);
+                        var s = ('0' + dt.getUTCSeconds()).slice(-2);
+                        return mm + '-' + dd + ' ' + h + ':' + m + ':' + s;
+                    }},
+                    { data: 2, render: function(d) { return d ? '<a href="/user/'+d+'" class="text-blue-600 font-medium">'+d+'</a>' : '-'; }},
+                    { data: 1, className: 'text-gray-600' },
+                    { data: 5, render: function(d) { return d || '-'; }, className: 'text-gray-500' },
+                    { data: 3, className: 'text-gray-500' },
+                    { data: 6, render: function(d) {
+                        if (d=='blocked') return '<span class="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">차단</span>';
+                        if (d=='allowed') return '<span class="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">허용</span>';
+                        return d || '-';
+                    }}
+                ],
+                order: [[0, 'desc']],
+                pageLength: 15,
+                language: { info: "_TOTAL_건 중 _START_-_END_", emptyTable: "로그 없음", paginate: { first: "«", previous: "‹", next: "›", last: "»" }}
+            });
+            $('#searchInput').on('keyup', function() { table.search(this.value).draw(); });
+            $('#pageLength').on('change', function() { table.page.len(this.value).draw(); });
+            $('#msgFilter, #outcomeFilter').on('change', function() { table.draw(); });
+        });
+    </script>
+</body>
+</html>

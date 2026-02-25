@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Risk Score - SafePC SIEM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.datatables.net/1.13.7/css/dataTables.tailwindcss.min.css" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .nav-menu { position: relative; }
+        .nav-item { padding: 8px 16px; font-size: 14px; font-weight: 500; border-radius: 8px; transition: all 0.2s; cursor: pointer; color: white; }
+        .nav-item:hover { background: white; color: #1e293b; }
+        .nav-item.active { background: #3b82f6; color: white; }
+        .nav-item.active:hover { background: #2563eb; color: white; }
+        .dropdown { position: absolute; top: 100%; left: 0; margin-top: 4px; background: white; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid #e5e7eb; padding: 4px 0; min-width: 160px; opacity: 0; visibility: hidden; transition: all 0.2s; }
+        .nav-menu:hover .dropdown { opacity: 1; visibility: visible; }
+        .dropdown a { display: block; padding: 8px 16px; font-size: 14px; color: #374151; }
+        .dropdown a:hover { background: #f3f4f6; }
+        .dropdown a.active { background: #eff6ff; color: #1d4ed8; font-weight: 500; }
+        table.dataTable thead th { font-size: 13px; font-weight: 600; color: #374151; background: #f9fafb; border-bottom: 2px solid #e5e7eb; padding: 14px 16px; text-align: left; cursor: pointer; }
+        table.dataTable tbody td { font-size: 12px; padding: 8px 12px; vertical-align: middle; }
+        table.dataTable tbody tr:hover { background: #f9fafb; }
+        .dataTables_wrapper .dataTables_length, .dataTables_wrapper .dataTables_filter { display: none; }
+        .dataTables_wrapper .dataTables_info { font-size: 13px; color: #6b7280; padding: 12px 0; }
+        .dataTables_wrapper .dataTables_paginate { padding: 12px 0; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button { padding: 6px 12px; margin: 0 2px; border-radius: 6px; border: 1px solid #e5e7eb; background: white; color: #374151 !important; font-size: 13px; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button:hover { background: #f3f4f6; border-color: #d1d5db; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button.current { background: #3b82f6; border-color: #3b82f6; color: white !important; }
+        .dataTables_wrapper .dataTables_paginate .paginate_button.disabled { opacity: 0.5; cursor: not-allowed; }
+        .custom-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #f3f4f6; }
+        .custom-search { display: flex; align-items: center; gap: 12px; }
+        .custom-search input { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 14px; width: 280px; outline: none; transition: border-color 0.2s; }
+        .custom-search input:focus { border-color: #3b82f6; }
+        .custom-search input::placeholder { color: #9ca3af; }
+        .custom-select { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #6b7280; }
+        .custom-select select { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 14px; background: white; cursor: pointer; outline: none; }
+        .custom-select select:focus { border-color: #3b82f6; }
+        .badge { padding: 4px 10px; font-size: 12px; font-weight: 500; border-radius: 9999px; }
+        .badge-critical { background: #fef2f2; color: #b91c1c; }
+        .badge-high { background: #fff7ed; color: #c2410c; }
+        .badge-medium { background: #fffbeb; color: #b45309; }
+        .badge-low { background: #ecfdf5; color: #047857; }
+        .progress { height: 8px; border-radius: 9999px; background: #e5e7eb; overflow: hidden; }
+        .progress-bar { height: 100%; border-radius: 9999px; }
+        a { cursor: pointer; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <nav class="bg-gradient-to-r from-slate-900 to-slate-800 text-white sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold tracking-tight">SafePC <span class="text-blue-400">SIEM</span></a>
+            <div class="flex items-center gap-2">
+                <a href="/" class="nav-item">Dashboard</a>
+                <div class="nav-menu">
+                    <span class="nav-item">Monitoring ▾</span>
+                    <div class="dropdown">
+                        <a href="/alerts">Alert History</a>
+                        <a href="/logs">Event Logs</a>
+                    </div>
+                </div>
+                <a href="/users" class="nav-item active">User Risk</a>
+                <a href="/rules" class="nav-item">CEP Rules</a>
+                <a href="/settings" class="nav-item">UEBA Settings</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="px-6 py-5">
+        <div class="bg-white rounded-2xl shadow-sm p-6">
+            <div class="mb-5">
+                <h1 class="text-xl font-bold text-gray-900">⚠️ User Risk Score</h1>
+                <p class="text-sm text-gray-500 mt-1">UEBA 기반 사용자별 위험도 점수 현황</p>
+            </div>
+            <div class="custom-controls flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <input type="text" id="searchInput" placeholder="🔍 검색어를 입력하세요" class="border border-gray-200 rounded-lg px-3 py-2 text-sm w-64 outline-none focus:border-blue-500">
+                    <div class="flex gap-1">
+                        <button class="filter-btn px-3 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50 {% if not level %}ring-2 ring-offset-1{% endif %}" data-level="">전체</button>
+                        <button class="filter-btn px-3 py-2 text-sm rounded-lg border border-red-200 text-red-700 hover:bg-red-50 {% if level == 'HIGH' %}ring-2 ring-offset-1{% endif %}" data-level="HIGH">위험</button>
+                        <button class="filter-btn px-3 py-2 text-sm rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 {% if level == 'MEDIUM' %}ring-2 ring-offset-1{% endif %}" data-level="MEDIUM">주의</button>
+                        <button class="filter-btn px-3 py-2 text-sm rounded-lg border border-green-200 text-green-700 hover:bg-green-50 {% if level == 'LOW' %}ring-2 ring-offset-1{% endif %}" data-level="LOW">관심</button>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 text-sm text-gray-500">
+                    <span>표시</span>
+                    <select id="pageLength" class="border border-gray-200 rounded-lg px-2 py-1">
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                    <span>개씩</span>
+                </div>
+            </div>
+            <table id="userTable" class="w-full">
+                <thead>
+                    <tr>
+                        <th>사용자</th>
+                        <th>위험도 점수</th>
+                        <th>등급</th>
+                        <th>로그인실패</th>
+                        <th>USB</th>
+                        <th>캡처</th>
+                        <th>프로세스</th>
+                        <th>악성코드</th>
+                        <th>분석시간</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    {% set user = u._source %}
+                    {% set feat = user.features or {} %}
+                    <tr>
+                        <td>
+                            <a href="/user/{{ user.userId }}" class="text-blue-600 hover:text-blue-800 font-medium">{{ user.userName or user.userId }}</a>
+                            {% if user.userName %}<div class="text-xs text-gray-400">{{ user.userId }}</div>{% endif %}
+                        </td>
+                        <td data-order="{{ user.riskScore * 1000 + (user.scoreDiff|default(0)) }}" class="whitespace-nowrap" style="width: 180px;">
+                            <div class="flex items-center gap-2">
+                                <div class="progress w-20">
+                                    <div class="progress-bar {% if user.riskScore > tiers.red_max|default(150) %}bg-red-500{% elif user.riskScore > tiers.yellow_max|default(99) %}bg-orange-500{% elif user.riskScore > tiers.green_max|default(40) %}bg-yellow-500{% else %}bg-green-500{% endif %}" style="width: {{ [user.riskScore, 100]|min }}%"></div>
+                                </div>
+                                <span class="font-bold text-gray-900">{{ "%.2f"|format(user.riskScore) }}점</span>
+                                {% if user.scoreDiff and user.scoreDiff > 0 %}
+                                <span class="text-xs text-red-500">▲+{{ "%.2f"|format(user.scoreDiff) }}점</span>
+                                {% elif user.scoreDiff and user.scoreDiff < 0 %}
+                                <span class="text-xs text-blue-500">▼{{ "%.2f"|format(user.scoreDiff) }}점</span>
+                                {% else %}
+                                <span class="text-xs text-gray-400">±0점</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            {% if user.riskLevel == 'HIGH' %}<span class="badge badge-high">위험</span>
+                            {% elif user.riskLevel == 'MEDIUM' %}<span class="badge badge-medium">주의</span>
+                            {% else %}<span class="badge badge-low">관심</span>{% endif %}
+                        </td>
+                        <td class="text-gray-600">{{ feat.loginFailCount or 0 }}</td>
+                        <td class="text-gray-600">{{ feat.usbWriteCount or 0 }}</td>
+                        <td class="text-gray-600">{{ feat.captureCount or 0 }}</td>
+                        <td class="text-gray-600">{{ feat.processBlockCount or 0 }}</td>
+                        <td class="{% if feat.malwareDetectCount %}text-red-600 font-semibold{% else %}text-gray-600{% endif %}">{{ feat.malwareDetectCount or 0 }}</td>
+                        <td class="text-gray-400 font-mono">{{ user['@timestamp'] | kst }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            var table = $('#userTable').DataTable({
+                order: [[1, 'desc']],
+                pageLength: 10,
+                language: {
+                    info: "_TOTAL_건 중 _START_-_END_",
+                    infoEmpty: "데이터 없음",
+                    emptyTable: "사용자 데이터가 없습니다",
+                    paginate: { first: "«", previous: "‹", next: "›", last: "»" }
+                }
+            });
+            $('#searchInput').on('keyup', function() { table.search(this.value).draw(); });
+            $('#pageLength').on('change', function() { table.page.len(this.value).draw(); });
+            $('.filter-btn').on('click', function() {
+                var level = $(this).data('level');
+                var label = level == 'HIGH' ? '위험' : level == 'MEDIUM' ? '주의' : level == 'LOW' ? '관심' : '';
+                $('.filter-btn').removeClass('ring-2 ring-offset-1');
+                $(this).addClass('ring-2 ring-offset-1');
+                table.column(2).search(label).draw();
+            });
+            {% if level %}
+            var initLabel = {% if level == 'HIGH' %}'위험'{% elif level == 'MEDIUM' %}'주의'{% else %}'관심'{% endif %};
+            table.column(2).search(initLabel).draw();
+            {% endif %}
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+server:
+  port: ":48084"
+
+opensearch:
+  url: "http://siem-opensearch:9200"
+
+kafka:
+  bootstrap: "43.202.241.121:44105"
+  group_id: "siem-cep-sql"
+  topics: "MESSAGE_.*"
+
+flink:
+  sql_gateway: "http://siem-flink-jobmanager:8083"
+  rest_api: "http://siem-flink-jobmanager:8081"
+  alert_topic: "cep-alerts"

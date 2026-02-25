@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  jobmanager:
+    image: flink:1.18-java11
+    container_name: siem-flink-jobmanager
+    ports:
+      - "48081:8081"
+    command: jobmanager
+    environment:
+      - TZ=Asia/Seoul
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 20
+    volumes:
+      - ./jobs:/opt/flink/jobs
+      - ./jobs:/opt/flink/usrlib
+      - ./config:/opt/flink/conf/custom
+    networks:
+      - siem-network
+    restart: unless-stopped
+
+  taskmanager:
+    image: flink:1.18-java11
+    container_name: siem-flink-taskmanager
+    depends_on:
+      - jobmanager
+    command: taskmanager
+    environment:
+      - TZ=Asia/Seoul
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 20
+        taskmanager.memory.process.size: 4g
+    networks:
+      - siem-network
+    restart: unless-stopped
+
+networks:
+  siem-network:
+    external: true
+    name: opensearch_siem-network

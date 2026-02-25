@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ user_id }} - SafePC SIEM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .nav-menu { position: relative; }
+        .nav-item { padding: 8px 16px; font-size: 14px; font-weight: 500; border-radius: 8px; transition: all 0.2s; cursor: pointer; color: white; }
+        .nav-item:hover { background: white; color: #1e293b; }
+        .nav-item.active { background: #3b82f6; color: white; }
+        .dropdown { position: absolute; top: 100%; left: 0; margin-top: 4px; background: white; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid #e5e7eb; padding: 4px 0; min-width: 160px; opacity: 0; visibility: hidden; transition: all 0.2s; }
+        .nav-menu:hover .dropdown { opacity: 1; visibility: visible; }
+        .dropdown a { display: block; padding: 8px 16px; font-size: 14px; color: #374151; }
+        .dropdown a:hover { background: #f3f4f6; }
+        .badge { padding: 4px 10px; font-size: 12px; font-weight: 500; border-radius: 9999px; }
+        .badge-critical { background: #fef2f2; color: #b91c1c; }
+        .badge-high { background: #fff7ed; color: #c2410c; }
+        .badge-medium { background: #fffbeb; color: #b45309; }
+        .badge-low { background: #ecfdf5; color: #047857; }
+        table.dataTable thead th { font-size: 12px; font-weight: 600; color: #6b7280; background: #f9fafb; padding: 8px 12px; text-align: left; cursor: pointer; }
+        table.dataTable tbody td { font-size: 12px; padding: 8px 12px; }
+        table.dataTable tbody tr:hover { background: #f9fafb; }
+        .dataTables_wrapper .dataTables_length, .dataTables_wrapper .dataTables_filter, .dataTables_wrapper .dataTables_info, .dataTables_wrapper .dataTables_paginate { display: none; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <nav class="bg-gradient-to-r from-slate-900 to-slate-800 text-white sticky top-0 z-50">
+        <div class="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold tracking-tight">SafePC <span class="text-blue-400">SIEM</span></a>
+            <div class="flex items-center gap-2">
+                <a href="/" class="nav-item">Dashboard</a>
+                <div class="nav-menu">
+                    <span class="nav-item">Monitoring ▾</span>
+                    <div class="dropdown">
+                        <a href="/alerts">Alert History</a>
+                        <a href="/logs">Event Logs</a>
+                    </div>
+                </div>
+                <a href="/users" class="nav-item active">User Risk</a>
+                <a href="/rules" class="nav-item">CEP Rules</a>
+                <a href="/settings" class="nav-item">UEBA Settings</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-[1600px] mx-auto px-6 py-5">
+        <div class="mb-5">
+            <a href="/users" class="text-gray-400 hover:text-gray-600 text-sm">← 목록으로</a>
+            <h1 class="text-xl font-bold text-gray-900 mt-2">{{ user_id }}</h1>
+            <p class="text-sm text-gray-500">사용자 상세 정보</p>
+        </div>
+
+        {% if ueba %}
+        {% set latest = ueba[0]._source %}
+        {% set current_score = latest.riskScore %}
+        {% set prev_score = latest.prevScore|default(0) %}
+        {% set score_diff = current_score - prev_score %}
+        
+        <div class="mb-5 flex items-stretch gap-4">
+            <div class="bg-white rounded-xl p-4 shadow-sm flex flex-col justify-center" style="min-width:160px;">
+                <div class="text-xs font-medium text-gray-500 mb-1">현재 점수</div>
+                <div class="flex items-center gap-2">
+                    <span class="text-3xl font-bold {% if current_score > tiers.high|default(99) %}text-red-600{% elif current_score > tiers.medium|default(40) %}text-yellow-600{% else %}text-green-600{% endif %}">{{ "%.2f"|format(current_score) }}점</span>
+                </div>
+                <div class="mt-1">
+                    {% if score_diff > 0 %}
+                    <span class="text-sm text-red-500">▲+{{ "%.2f"|format(score_diff) }}</span>
+                    {% elif score_diff < 0 %}
+                    <span class="text-sm text-blue-500">▼{{ "%.2f"|format(score_diff) }}</span>
+                    {% else %}
+                    <span class="text-sm text-gray-400">±0</span>
+                    {% endif %}
+                    {% if current_score > tiers.high|default(99) %}<span class="badge badge-high ml-2">위험</span>
+                    {% elif current_score > tiers.medium|default(40) %}<span class="badge badge-medium ml-2">주의</span>
+                    {% else %}<span class="badge badge-low ml-2">관심</span>{% endif %}
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-4 shadow-sm flex-1">
+                <div class="flex justify-between items-center mb-3">
+                    <span id="chart-title" class="text-xs font-medium text-gray-500">일별 점수 (7일)</span>
+                    <div class="flex border border-gray-200 rounded overflow-hidden text-xs">
+                        <button id="btn-daily" onclick="setChartView('daily')" class="px-3 py-1 bg-blue-500 text-white">Daily</button>
+                        <button id="btn-event" onclick="setChartView('event')" class="px-3 py-1 bg-white text-gray-600 border-l">Hourly</button>
+                    </div>
+                </div>
+                <div id="chart-daily" class="flex items-end gap-1" style="height:80px;"></div>
+                <div id="chart-event" style="height:100px;display:none;"><canvas id="eventCanvas"></canvas></div>
+                <div id="chart-tooltip" class="hidden absolute bg-gray-800 text-white text-xs px-2 py-1 rounded pointer-events-none z-50" style="white-space:pre-line;"></div>
+            </div>
+        </div>
+
+        {% set eventValues = latest.eventValues or {} %}
+        {% set ruleScores = latest.ruleScores or {} %}
+        <div class="grid grid-cols-2 gap-4 mb-5">
+            <div class="bg-white rounded-xl shadow-sm">
+                <div class="px-4 py-3 border-b border-gray-100 font-semibold text-sm">📊 행동 지표 <span class="text-gray-400 font-normal">(UEBA 룰 매칭, 오늘)</span></div>
+                {% if eventValues %}
+                <div class="p-4 grid grid-cols-3 gap-3">
+                    {% for name, count in eventValues.items() %}
+                    <div class="text-center p-3 bg-gray-50 rounded-lg">
+                        <div class="text-xl font-bold text-gray-900">{{ "{:,}".format(count|int) }}</div>
+                        <div class="text-xs text-gray-500">{{ name }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="p-4 text-center text-gray-400 text-sm">오늘 활동 데이터 없음</div>
+                {% endif %}
+            </div>
+            <div class="bg-white rounded-xl shadow-sm">
+                <div class="px-4 py-3 border-b border-gray-100 font-semibold text-sm">⚠️ 점수 변화 상세 <span class="text-gray-400 font-normal">({% if score_diff >= 0 %}+{% endif %}{{ "%.2f"|format(score_diff) }})</span></div>
+                <div class="p-4">
+                    {% set decay_change = (latest.decayedPrev or 0) - (latest.prevScore or 0) %}
+                    <div class="flex flex-wrap gap-2">
+                        {% for rule, score in ruleScores.items() %}
+                        <span class="badge badge-high">{{ rule }} <span class="text-red-300">+{{ "%.2f"|format(score) }}</span></span>
+                        {% endfor %}
+                        {% if latest.anomalyScore %}<span class="badge badge-medium">이상행동 <span class="text-yellow-600">+{{ "%.2f"|format(latest.anomalyScore) }}</span></span>{% endif %}
+                        {% if decay_change %}<span class="badge badge-low">전일감쇠 <span class="text-blue-600">{{ "%.2f"|format(decay_change) }}</span></span>{% endif %}
+                    </div>
+                    {% if not ruleScores and not latest.anomalyScore and not decay_change %}
+                    <p class="text-gray-400 text-sm">변화 없음</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white rounded-xl shadow-sm">
+                <div class="px-4 py-3 border-b border-gray-100 font-semibold text-sm">🔔 CEP 위반 내역 (오늘)</div>
+                {% if alerts %}
+                <div class="overflow-auto" style="max-height: 280px;">
+                    <table id="alertTable" class="w-full">
+                        <thead>
+                            <tr>
+                                <th>시간</th>
+                                <th>룰</th>
+                                <th>등급</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for a in alerts %}
+                            {% set alert = a._source %}
+                            <tr>
+                                <td class="text-gray-500 font-mono">{{ alert['@timestamp'] | kst }}</td>
+                                <td>
+                                    <div class="font-medium text-gray-900">{{ alert.ruleName or alert.ruleId }}</div>
+                                    <div class="text-xs text-gray-400">{{ alert.ruleId }}</div>
+                                </td>
+                                <td>
+                                    {% if alert.severity == 'CRITICAL' %}<span class="badge badge-critical">긴급</span>
+                                    {% elif alert.severity == 'HIGH' %}<span class="badge badge-high">주의</span>
+                                    {% else %}<span class="badge badge-medium">보통</span>{% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="p-4 text-gray-400 text-sm">Alert 없음</div>
+                {% endif %}
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm">
+                <div class="px-4 py-3 border-b border-gray-100 font-semibold text-sm">📋 오늘 활동</div>
+                <div class="overflow-auto" style="max-height: 280px;">
+                    <table id="logTable" class="w-full">
+                        <thead>
+                            <tr>
+                                <th>시간</th>
+                                <th>이벤트</th>
+                                <th>결과</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for l in logs %}
+                            {% set log = l._source %}
+                            <tr>
+                                <td class="text-gray-400 font-mono">{{ log['@timestamp'] | kst }}</td>
+                                <td class="text-gray-900">{{ (log.msgId or '') | replace('MESSAGE_', '') }}</td>
+                                <td class="{% if log.outcome == 'blocked' %}text-red-600 font-medium{% elif log.outcome == 'allowed' %}text-green-600{% else %}text-gray-500{% endif %}">{{ log.outcome or '-' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        var dailyData = [], eventData = [], eventChart = null;
+        var $tooltip = null;
+        function tierColor(score) { return score >= 99 ? '#ef4444' : score >= 40 ? '#eab308' : '#22c55e'; }
+        function showTooltip(e, text) {
+            $tooltip.html(text).removeClass('hidden').css({left: e.pageX + 10, top: e.pageY - 10});
+        }
+        function hideTooltip() { $tooltip.addClass('hidden'); }
+        function setChartView(view) {
+            $('#btn-daily').removeClass('bg-blue-500 text-white bg-white text-gray-600').addClass(view === 'daily' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600');
+            $('#btn-event').removeClass('bg-blue-500 text-white bg-white text-gray-600').addClass(view === 'event' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600');
+            $('#chart-daily').toggle(view === 'daily');
+            $('#chart-event').toggle(view === 'event');
+            $('#chart-title').text(view === 'daily' ? '일별 점수 (7일)' : '시간대별 점수 구성 (오늘)');
+        }
+        function renderDaily(data) {
+            if (!data.length) { $('#chart-daily').html('<span class="text-gray-400 text-xs">데이터 없음</span>'); return; }
+            var max = Math.max(...data.map(d => d.score), 100);
+            var html = data.map((d,i) => {
+                var h = d.score > 0 ? Math.max(d.score / max * 100, 8) : 4;
+                return '<div class="flex flex-col items-center chart-bar" data-idx="'+i+'" style="flex:1;height:100%;justify-content:flex-end;"><div class="bar" style="width:100%;height:'+h+'%;background:'+tierColor(d.score)+';border-radius:3px;min-height:4px;"></div><span class="text-gray-400 mt-1" style="font-size:10px;">'+d.label+'</span></div>';
+            }).join('');
+            $('#chart-daily').html(html);
+            $('#chart-daily .chart-bar').on('mouseenter', function(e) {
+                var d = data[$(this).data('idx')];
+                showTooltip(e, d.date + '\n점수: ' + d.score.toFixed(2) + '점');
+            }).on('mousemove', function(e) {
+                $tooltip.css({left: e.pageX + 10, top: e.pageY - 10});
+            }).on('mouseleave', hideTooltip);
+        }
+        function renderEvent(data) {
+            // 시간대별 점수 구성 (0~23시)
+            var hourly = Array(24).fill(0).map(() => ({ruleScore:0, anomalyScore:0}));
+            data.forEach(d => {
+                hourly[d.hour].ruleScore = d.ruleScore || 0;
+                hourly[d.hour].anomalyScore = d.anomalyScore || 0;
+            });
+            var ctx = document.getElementById('eventCanvas').getContext('2d');
+            if (eventChart) eventChart.destroy();
+            eventChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Array.from({length:24}, (_,i) => i+'시'),
+                    datasets: [
+                        {label: '규칙 위반', data: hourly.map(h=>h.ruleScore), backgroundColor: '#ef4444'},
+                        {label: '이상 행동', data: hourly.map(h=>h.anomalyScore), backgroundColor: '#f59e0b'}
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: {display: true, position: 'bottom', labels: {boxWidth: 12, font: {size: 10}}},
+                        tooltip: {callbacks: {label: function(ctx) { return ctx.dataset.label + ': ' + ctx.raw.toFixed(2); }}}
+                    },
+                    scales: {x: {stacked: true, ticks: {font: {size: 9}}}, y: {stacked: true, beginAtZero: true, ticks: {font: {size: 9}}}}
+                }
+            });
+        }
+        $(document).ready(function() {
+            $tooltip = $('#chart-tooltip');
+            $('#alertTable').DataTable({ order: [[0, 'desc']], paging: false, searching: false, info: false });
+            $('#logTable').DataTable({ order: [[0, 'desc']], paging: false, searching: false, info: false });
+            fetch('/api/user/{{ user_id }}/history').then(r => r.json()).then(data => {
+                dailyData = data.daily || [];
+                renderDaily(dailyData);
+                renderEvent(data.hourly || []);
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UEBA Settings - SafePC SIEM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .nav-item { padding: 8px 16px; font-size: 14px; font-weight: 500; border-radius: 8px; transition: all 0.2s; cursor: pointer; color: white; }
+        .nav-item:hover { background: white; color: #1e293b; }
+        .nav-item.active { background: #3b82f6; color: white; }
+        .nav-menu { position: relative; }
+        .dropdown { position: absolute; top: 100%; left: 0; margin-top: 4px; background: white; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid #e5e7eb; padding: 4px 0; min-width: 160px; opacity: 0; visibility: hidden; transition: all 0.2s; }
+        .nav-menu:hover .dropdown { opacity: 1; visibility: visible; }
+        .dropdown a { display: block; padding: 8px 16px; font-size: 14px; color: #374151; }
+        .dropdown a:hover { background: #f3f4f6; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e5e7eb; }
+        .input-field { width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+        .input-field:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+        .btn { padding: 8px 16px; font-size: 14px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+        .btn-secondary:hover { background: #e5e7eb; }
+        .tab { padding: 10px 20px; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; color: #6b7280; }
+        .tab:hover { color: #374151; }
+        .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: #10b981; color: white; }
+        .toast.error { background: #ef4444; color: white; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <nav class="bg-gradient-to-r from-slate-900 to-slate-800 text-white sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold tracking-tight">SafePC <span class="text-blue-400">SIEM</span></a>
+            <div class="flex items-center gap-2">
+                <a href="/" class="nav-item">Dashboard</a>
+                <div class="nav-menu">
+                    <span class="nav-item">Monitoring ▾</span>
+                    <div class="dropdown">
+                        <a href="/alerts">Alert History</a>
+                        <a href="/logs">Event Logs</a>
+                    </div>
+                </div>
+                <a href="/users" class="nav-item">User Risk</a>
+                <a href="/rules" class="nav-item">CEP Rules</a>
+                <a href="/settings" class="nav-item active">UEBA Settings</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-6 py-6">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900">UEBA Settings</h1>
+                <p class="text-sm text-gray-500 mt-1">사용자 행동 분석 점수 계산 설정</p>
+            </div>
+            <button onclick="saveSettings()" class="btn btn-primary">💾 설정 저장</button>
+        </div>
+
+        <!-- UEBA 모델 설명 -->
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6">
+            <h3 class="font-semibold text-blue-900 mb-3">📊 UEBA 위험도 분석 모델</h3>
+            <div class="text-sm text-blue-800">
+                <p class="font-mono bg-white/50 p-2 rounded text-center mb-3">
+                    Risk<sub>t</sub> = (Risk<sub>t-1</sub> × λ) + [Σ(W<sub>i</sub> × f(C<sub>i</sub>) × M<sub>context</sub>) + A<sub>anomaly</sub>]
+                </p>
+                <div class="grid grid-cols-3 gap-4 text-xs">
+                    <div>
+                        <div class="font-semibold mb-1">Daily Risk (오늘 발생 위험)</div>
+                        <div><b>W<sub>i</sub></b>: 이벤트 가중치 (1~10)</div>
+                        <div><b>f(C)</b>: 빈도 함수 log(C+1)</div>
+                        <div><b>M<sub>context</sub></b>: 상황 가중치</div>
+                    </div>
+                    <div>
+                        <div class="font-semibold mb-1">Anomaly Score (이상치)</div>
+                        <div><b>A</b> = β × max(0, Z - Z<sub>threshold</sub>)</div>
+                        <div>β=10, Z<sub>threshold</sub>=2.0</div>
+                        <div class="text-gray-600">(표준편차 2배 초과 시)</div>
+                    </div>
+                    <div>
+                        <div class="font-semibold mb-1">Time Decay (시간 감쇠)</div>
+                        <div>λ=0.9 (매일 10% 감쇠)</div>
+                        <div class="text-gray-600">약 7일 반감기</div>
+                        <div class="text-gray-600">과거 위험은 시간이 지나면 희석</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex border-b border-gray-200 mb-6">
+            <div class="tab active" data-tab="weights">이벤트 가중치</div>
+            <div class="tab" data-tab="multipliers">상황 가중치</div>
+            <div class="tab" data-tab="anomaly">이상치 탐지</div>
+            <div class="tab" data-tab="decay">시간 감쇠</div>
+            <div class="tab" data-tab="tiers">등급 임계치</div>
+        </div>
+
+        <!-- 이벤트 가중치 -->
+        <div id="weights-panel" class="card p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold">이벤트별 기본 가중치 (Wi)</h2>
+                <span class="text-sm text-gray-500">점수 = Σ(Wi × f(Ci) × Mcontext)</span>
+            </div>
+            <div class="grid grid-cols-2 gap-4" id="weights-grid">
+                <!-- JS로 채움 -->
+            </div>
+        </div>
+
+        <!-- 상황 가중치 -->
+        <div id="multipliers-panel" class="card p-6 hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold">상황별 가중치 (Mcontext)</h2>
+                <span class="text-sm text-gray-500">사용자 상태에 따른 배수</span>
+            </div>
+            <div class="grid grid-cols-2 gap-4" id="multipliers-grid">
+                <!-- JS로 채움 -->
+            </div>
+        </div>
+
+        <!-- 이상치 탐지 -->
+        <div id="anomaly-panel" class="card p-6 hidden">
+            <div class="mb-4">
+                <h2 class="text-lg font-semibold">이상치 탐지 설정 (Z-Score)</h2>
+                <p class="text-sm text-gray-500 mt-1">Anomaly = β × max(0, Z - threshold)</p>
+            </div>
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Z-Score 임계치 (z_threshold)</label>
+                    <input type="number" step="0.1" id="z_threshold" class="input-field" placeholder="2.0">
+                    <p class="text-xs text-gray-500 mt-1">이 값 이하의 Z-Score는 무시 (기본: 2.0)</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">변환 계수 (beta)</label>
+                    <input type="number" step="1" id="beta" class="input-field" placeholder="10">
+                    <p class="text-xs text-gray-500 mt-1">Z-Score 1당 가산 점수 (기본: 10)</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">최소 표준편차 (sigma_floor)</label>
+                    <input type="number" step="0.1" id="sigma_floor" class="input-field" placeholder="0.5">
+                    <p class="text-xs text-gray-500 mt-1">0 나누기 방지용 최소값 (기본: 0.5)</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Baseline 윈도우 (일)</label>
+                    <input type="number" id="baseline_window_days" class="input-field" placeholder="30">
+                    <p class="text-xs text-gray-500 mt-1">평균/표준편차 계산 기간 (기본: 30일)</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Cold Start 최소 일수</label>
+                    <input type="number" id="cold_start_min_days" class="input-field" placeholder="7">
+                    <p class="text-xs text-gray-500 mt-1">개인 Baseline 최소 데이터 일수 (기본: 7일)</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">빈도 함수</label>
+                    <select id="frequency_function" class="input-field">
+                        <option value="log">log (자연로그)</option>
+                        <option value="log2">log2 (이진로그)</option>
+                        <option value="log10">log10 (상용로그)</option>
+                        <option value="linear">linear (선형)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">f(C) = log(C+1) 등</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 시간 감쇠 -->
+        <div id="decay-panel" class="card p-6 hidden">
+            <div class="mb-4">
+                <h2 class="text-lg font-semibold">시간 감쇠 설정 (Time Decay)</h2>
+                <p class="text-sm text-gray-500 mt-1">Rt = Rt-1 × λ + St (과거 점수 감쇠)</p>
+            </div>
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">감쇠 계수 (lambda)</label>
+                    <input type="number" step="0.01" id="decay_lambda" class="input-field" placeholder="0.9">
+                    <p class="text-xs text-gray-500 mt-1">0.9 = 약 7일 반감기, 0.8 = 약 3일 반감기</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">주말 처리</label>
+                    <select id="weekend_mode" class="input-field">
+                        <option value="time">Time-based (주말 포함 감쇠)</option>
+                        <option value="activity">Activity-based (접속일만)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">주말에도 점수 감쇠 적용 여부</p>
+                </div>
+            </div>
+            <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+                <h3 class="font-medium text-blue-900 mb-2">반감기 참고</h3>
+                <div class="text-sm text-blue-800 grid grid-cols-3 gap-2">
+                    <span>λ=0.5 → 1일</span>
+                    <span>λ=0.8 → 3일</span>
+                    <span>λ=0.9 → 7일</span>
+                    <span>λ=0.95 → 14일</span>
+                    <span>λ=0.99 → 69일</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 등급 임계치 -->
+        <div id="tiers-panel" class="card p-6 hidden">
+            <div class="mb-4">
+                <h2 class="text-lg font-semibold">위험 등급 임계치</h2>
+                <p class="text-sm text-gray-500 mt-1">점수 구간별 등급 분류</p>
+            </div>
+            <div class="grid grid-cols-3 gap-6">
+                <div class="p-4 bg-green-50 rounded-lg border border-green-200">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-3 h-3 bg-green-500 rounded-full"></span>
+                        <span class="font-semibold text-green-800">Green (관심)</span>
+                    </div>
+                    <label class="block text-sm text-green-700 mb-1">최대 점수</label>
+                    <input type="number" id="tier_green_max" class="input-field" placeholder="40">
+                    <p class="text-xs text-green-600 mt-1">0 ~ 이 값까지</p>
+                </div>
+                <div class="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-3 h-3 bg-yellow-500 rounded-full"></span>
+                        <span class="font-semibold text-yellow-800">Yellow (주의)</span>
+                    </div>
+                    <label class="block text-sm text-yellow-700 mb-1">최대 점수</label>
+                    <input type="number" id="tier_yellow_max" class="input-field" placeholder="99">
+                    <p class="text-xs text-yellow-600 mt-1">Green 초과 ~ 이 값까지</p>
+                </div>
+                <div class="p-4 bg-red-50 rounded-lg border border-red-200">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-3 h-3 bg-red-500 rounded-full"></span>
+                        <span class="font-semibold text-red-800">Red (위험)</span>
+                    </div>
+                    <p class="text-sm text-red-700 mt-6">Yellow 초과</p>
+                    <p class="text-xs text-red-600 mt-1">100점 이상</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // 기본값
+        const defaults = {
+            weights: {
+                usb_write_connect: { name: 'USB 쓰기 연결', weight: 5, msgId: 'MESSAGE_DEVICE_USAGE' },
+                large_file_copy: { name: '대용량 파일 복사', weight: 8, msgId: 'MESSAGE_DEVICE_USAGE' },
+                blocked_media_access: { name: '차단 매체 접근', weight: 7, msgId: 'MESSAGE_DEVICE_USAGE' },
+                print_pii: { name: '개인정보 인쇄', weight: 9, msgId: 'MESSAGE_PRINT_USAGE' },
+                mass_print: { name: '다량 인쇄', weight: 7, msgId: 'MESSAGE_PRINT_USAGE' },
+                screen_capture_drm: { name: '화면 캡처 차단', weight: 6, msgId: 'MESSAGE_CAPTURE_BLOCK' },
+                cloud_upload: { name: '클라우드 업로드', weight: 7, msgId: 'MESSAGE_NETWORK_UPLOAD' },
+                messenger_file_transfer: { name: '메신저 파일 전송', weight: 6, msgId: 'MESSAGE_NETWORK_MESSENGER' },
+                harmful_site_visit: { name: '유해 사이트 방문', weight: 4, msgId: 'MESSAGE_NETWORK_BLOCKED' },
+                off_hours_access: { name: '비업무시간 접속', weight: 5, msgId: 'MESSAGE_AGENT_AUTHENTICATION' },
+                hacking_tool: { name: '해킹툴/악성 프로세스', weight: 10, msgId: 'MESSAGE_PROCESS_CONTROL' }
+            },
+            multipliers: {
+                normal: { name: '일반 (Normal)', multiplier: 1.0, desc: '일반 사용자' },
+                departing: { name: '퇴사 예정 (Departing)', multiplier: 2.0, desc: '퇴사 예정자 - 위험도 2배' },
+                vacation: { name: '휴가 중 (Vacation)', multiplier: 1.5, desc: '휴가 중 접속' },
+                blacklist: { name: '블랙리스트 (Blacklist)', multiplier: 2.0, desc: '블랙리스트 사용자' },
+                probation: { name: '수습 기간 (Probation)', multiplier: 1.3, desc: '수습 기간 중' },
+                contractor: { name: '외부 용역 (Contractor)', multiplier: 1.5, desc: '외부 용역/협력사' },
+                vip: { name: 'VIP', multiplier: 0.5, desc: 'VIP - 위험도 감소' }
+            },
+            anomaly: { z_threshold: 2.0, beta: 10, sigma_floor: 0.5, baseline_window_days: 30, cold_start_min_days: 7, frequency_function: 'log' },
+            decay: { lambda: 0.9, weekend_mode: 'time' },
+            tiers: { green_max: 40, yellow_max: 99 }
+        };
+
+        let settings = JSON.parse(JSON.stringify(defaults));
+
+        // 탭 전환
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                ['weights', 'multipliers', 'anomaly', 'decay', 'tiers'].forEach(p => {
+                    document.getElementById(p + '-panel').classList.toggle('hidden', this.dataset.tab !== p);
+                });
+            });
+        });
+
+        // 설정 로드
+        async function loadSettings() {
+            try {
+                const r = await fetch('/api/ueba/settings');
+                if (r.ok) {
+                    const data = await r.json();
+                    if (data && Object.keys(data).length > 0) {
+                        settings = { ...defaults, ...data };
+                    }
+                }
+            } catch (e) { console.log('Using defaults'); }
+            renderSettings();
+        }
+
+        // 렌더링
+        function renderSettings() {
+            // 가중치
+            const wGrid = document.getElementById('weights-grid');
+            wGrid.innerHTML = '';
+            for (const [key, val] of Object.entries(settings.weights)) {
+                wGrid.innerHTML += `
+                    <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                        <div class="flex-1">
+                            <div class="font-medium text-gray-900">${val.name}</div>
+                            <div class="text-xs text-gray-500">${val.msgId}</div>
+                        </div>
+                        <input type="number" min="1" max="10" value="${val.weight}" 
+                            onchange="settings.weights['${key}'].weight = +this.value"
+                            class="w-20 input-field text-center font-semibold">
+                    </div>`;
+            }
+
+            // 상황 가중치
+            const mGrid = document.getElementById('multipliers-grid');
+            mGrid.innerHTML = '';
+            for (const [key, val] of Object.entries(settings.multipliers)) {
+                mGrid.innerHTML += `
+                    <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                        <div class="flex-1">
+                            <div class="font-medium text-gray-900">${val.name}</div>
+                            <div class="text-xs text-gray-500">${val.desc || key}</div>
+                        </div>
+                        <input type="number" step="0.1" min="0.1" max="5" value="${val.multiplier}" 
+                            onchange="settings.multipliers['${key}'].multiplier = +this.value"
+                            class="w-20 input-field text-center font-semibold">
+                        <span class="text-gray-500">×</span>
+                    </div>`;
+            }
+
+            // 이상치 탐지
+            document.getElementById('z_threshold').value = settings.anomaly.z_threshold;
+            document.getElementById('beta').value = settings.anomaly.beta;
+            document.getElementById('sigma_floor').value = settings.anomaly.sigma_floor;
+            document.getElementById('baseline_window_days').value = settings.anomaly.baseline_window_days;
+            document.getElementById('cold_start_min_days').value = settings.anomaly.cold_start_min_days;
+            document.getElementById('frequency_function').value = settings.anomaly.frequency_function;
+
+            // 시간 감쇠
+            document.getElementById('decay_lambda').value = settings.decay.lambda;
+            document.getElementById('weekend_mode').value = settings.decay.weekend_mode;
+
+            // 등급
+            document.getElementById('tier_green_max').value = settings.tiers.green_max;
+            document.getElementById('tier_yellow_max').value = settings.tiers.yellow_max;
+        }
+
+        // 저장
+        async function saveSettings() {
+            // 입력값 수집
+            settings.anomaly.z_threshold = +document.getElementById('z_threshold').value;
+            settings.anomaly.beta = +document.getElementById('beta').value;
+            settings.anomaly.sigma_floor = +document.getElementById('sigma_floor').value;
+            settings.anomaly.baseline_window_days = +document.getElementById('baseline_window_days').value;
+            settings.anomaly.cold_start_min_days = +document.getElementById('cold_start_min_days').value;
+            settings.anomaly.frequency_function = document.getElementById('frequency_function').value;
+            settings.decay.lambda = +document.getElementById('decay_lambda').value;
+            settings.decay.weekend_mode = document.getElementById('weekend_mode').value;
+            settings.tiers.green_max = +document.getElementById('tier_green_max').value;
+            settings.tiers.yellow_max = +document.getElementById('tier_yellow_max').value;
+
+            try {
+                const r = await fetch('/api/ueba/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                if (r.ok) {
+                    showToast('설정이 저장되었습니다', 'success');
+                } else {
+                    showToast('저장 실패', 'error');
+                }
+            } catch (e) {
+                showToast('저장 실패: ' + e.message, 'error');
+            }
+        }
+
+        function showToast(msg, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        loadSettings();
+    </script>
+</body>
+</html>

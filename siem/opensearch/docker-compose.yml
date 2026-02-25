@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.11.1
+    container_name: siem-opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g
+      - DISABLE_SECURITY_PLUGIN=true
+      - TZ=Asia/Seoul
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - ./data:/usr/share/opensearch/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "49200:9200"
+      - "49300:9300"
+    networks:
+      - siem-network
+    restart: unless-stopped
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.1
+    container_name: siem-opensearch-dashboards
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+      - TZ=Asia/Seoul
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "45601:5601"
+    networks:
+      - siem-network
+    depends_on:
+      - opensearch
+    restart: unless-stopped
+
+networks:
+  siem-network:
+    driver: bridge
