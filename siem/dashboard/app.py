@@ -512,6 +512,8 @@ async def cep_reload():
 async def update_siem_rule(rule_id: str, request: Request):
     """규칙 수정 — UEBA/CEP 각각 위임"""
     data = await request.json()
+    import logging
+    logging.info(f"[RULE PUT] {rule_id}: cep={data.get('cep')}, keys={list(data.keys())}")
     result = {}
     try:
         async with httpx.AsyncClient() as client:

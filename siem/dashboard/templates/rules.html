@@ -505,7 +505,7 @@
                 rule.match.conditions[parseInt(input.dataset.idx)].end = parseInt(input.value);
             });
             
-            // JSON 편집 영역의 내용을 파싱하여 저장
+            // JSON 편집 영역 또는 모달 필드에서 저장 데이터 구성
             let saveData;
             try {
                 saveData = JSON.parse(document.getElementById('editJson').value);
@@ -513,9 +513,24 @@
                 alert('JSON 형식 오류: ' + e.message);
                 return;
             }
+            // 모달 필드 값으로 오버라이드
             saveData.enabled = document.getElementById('editEnabled').checked;
             saveData.name = document.getElementById('editName').value;
-            if (saveData.cep) saveData.cep.severity = document.getElementById('editSeverity').value;
+            if (saveData.cep) {
+                saveData.cep.severity = document.getElementById('editSeverity').value;
+                if (document.getElementById('thresholdGroup').style.display !== 'none') {
+                    const tv = parseInt(document.getElementById('editThreshold').value);
+                    saveData.cep.threshold = tv;
+                    if (saveData.aggregate?.count) saveData.aggregate.count.min = tv;
+                }
+                if (saveData.cep.window && document.getElementById('windowGroup').style.display !== 'none') {
+                    saveData.cep.window = document.getElementById('editWindowValue').value + document.getElementById('editWindowUnit').value;
+                    if (saveData.aggregate) saveData.aggregate.within = saveData.cep.window;
+                }
+            }
+            if (saveData.weight !== undefined) {
+                saveData.weight = parseFloat(document.getElementById('editWeight').value);
+            }
             
             const res = await fetch(`/api/cep/rules/${ruleId}`, {
                 method: 'PUT',
