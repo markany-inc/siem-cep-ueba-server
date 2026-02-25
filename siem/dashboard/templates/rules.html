@@ -242,50 +242,9 @@
                 <input type="hidden" id="editRuleType">
                 
                 <div class="form-group">
-                    <label class="form-label">규칙 이름</label>
-                    <input type="text" id="editName" class="form-input">
-                </div>
-                
-                <div id="weightGroup" class="form-group">
-                    <label class="form-label">가중치 (UEBA)</label>
-                    <input type="number" id="editWeight" class="form-input" min="1" max="20" step="1">
-                    <p class="form-hint">1~20 (높을수록 위험도 기여 증가)</p>
-                </div>
-                
-                <div id="severityGroup" class="form-group">
-                    <label class="form-label">등급 (CEP)</label>
-                    <select id="editSeverity" class="form-select">
-                        <option value="CRITICAL">CRITICAL (긴급)</option>
-                        <option value="HIGH">HIGH (주의)</option>
-                        <option value="MEDIUM">MEDIUM (보통)</option>
-                        <option value="LOW">LOW (낮음)</option>
-                    </select>
-                </div>
-                
-                <div id="windowGroup" class="form-group">
-                    <label class="form-label">시간 윈도우</label>
-                    <div class="flex gap-2">
-                        <input type="number" id="editWindowValue" class="form-input w-24" min="1" max="60">
-                        <select id="editWindowUnit" class="form-select w-24">
-                            <option value="m">분</option>
-                            <option value="h">시간</option>
-                        </select>
-                        <span class="flex items-center text-gray-500 text-sm">내</span>
-                    </div>
-                </div>
-                
-                <div id="thresholdGroup" class="form-group">
-                    <label class="form-label">임계값 (횟수/합계)</label>
-                    <input type="number" id="editThreshold" class="form-input" min="1">
-                    <p class="form-hint">윈도우 내 이 횟수 이상 발생 시 알림</p>
-                </div>
-                
-                <div id="conditionFields"></div>
-                
-                <div class="form-group">
-                    <label class="form-label">규칙 JSON (원본 데이터)</label>
-                    <textarea id="editJson" class="form-input" rows="10" style="font-family:monospace;font-size:12px;white-space:pre;tab-size:2"></textarea>
-                    <p class="form-hint">규칙 JSON을 직접 수정할 수 있습니다. 저장 시 이 JSON이 OpenSearch에 저장됩니다.</p>
+                    <label class="form-label">규칙 JSON</label>
+                    <textarea id="editJson" class="form-input" rows="18" style="font-family:monospace;font-size:12px;white-space:pre;tab-size:2"></textarea>
+                    <p class="form-hint">JSON을 직접 수정 후 저장하면 CEP/UEBA에 반영됩니다.</p>
                 </div>
                 
                 <div class="form-group">
@@ -402,31 +361,10 @@
             document.getElementById('editName').value = rule.name;
             document.getElementById('editEnabled').checked = rule.enabled;
             
-            // CEP/UEBA별 필드 표시
-            document.getElementById('weightGroup').style.display = isUeba ? 'block' : 'none';
-            document.getElementById('severityGroup').style.display = isCep ? 'block' : 'none';
-            document.getElementById('windowGroup').style.display = isCep && rule.cep?.window ? 'block' : 'none';
-            const countMin = rule.aggregate?.count?.min || rule.cep?.threshold || 0; document.getElementById('thresholdGroup').style.display = isCep && countMin > 0 ? 'block' : 'none';
-            
-            if (isUeba) {
-                document.getElementById('editWeight').value = rule.weight;
-            }
-            if (isCep) {
-                document.getElementById('editSeverity').value = rule.cep?.severity || 'MEDIUM';
-                if (rule.cep?.window) {
-                    const match = rule.cep.window.match(/(\d+)([mh])/);
-                    if (match) {
-                        document.getElementById('editWindowValue').value = match[1];
-                        document.getElementById('editWindowUnit').value = match[2];
-                    }
-                }
-                document.getElementById('editThreshold').value = rule.aggregate?.count?.min || rule.cep?.threshold || 1;
-            }
-            
-            // 조건 필드
-            const condFields = document.getElementById('conditionFields');
-            condFields.innerHTML = '';
-            (rule.match?.conditions || []).forEach((cond, idx) => {
+            // JSON 표시 (개별 필드 없음)
+            // 조건 필드 — 미사용 (JSON 직접 편집)
+            const condFields_unused = null;
+            if (false) (rule.match?.conditions || []).forEach((cond, idx) => {
                 if (cond.op === 'gte' || cond.op === 'gt') {
                     const isMB = typeof cond.value === 'number' && cond.value >= 1048576;
                     const displayVal = isMB ? Math.round(cond.value / 1048576) : cond.value;
@@ -466,67 +404,18 @@
         }
         
 
-        // 모달 필드 변경 → JSON 텍스트 동기화
-        function syncFieldsToJson() {
-            try {
-                const j = JSON.parse(document.getElementById('editJson').value);
-                j.enabled = document.getElementById('editEnabled').checked;
-                j.name = document.getElementById('editName').value;
-                const ruleType = document.getElementById('editRuleType').value;
-                if (ruleType === 'ueba') {
-                    j.weight = parseFloat(document.getElementById('editWeight').value) || j.weight;
-                } else {
-                    if (j.cep) j.cep.severity = document.getElementById('editSeverity').value;
-                }
-                document.getElementById('editJson').value = JSON.stringify(j, null, 2);
-            } catch(e) {}
-        }
-        document.querySelectorAll('#editName,#editWeight,#editSeverity,#editEnabled').forEach(el => {
-            el.addEventListener('change', syncFieldsToJson);
-            el.addEventListener('input', syncFieldsToJson);
-        });
-
         document.getElementById('editForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const ruleId = document.getElementById('editRuleId').value;
-            const ruleType = document.getElementById('editRuleType').value;
-            const rule = rulesData[ruleId];
             
-            rule.enabled = document.getElementById('editEnabled').checked;
-            rule.updatedAt = new Date().toISOString();
+            // enabled 체크박스 → JSON 반영
+            try {
+                const j = JSON.parse(document.getElementById('editJson').value);
+                j.enabled = document.getElementById('editEnabled').checked;
+                document.getElementById('editJson').value = JSON.stringify(j, null, 2);
+            } catch(e) {}
             
-            if (ruleType === 'ueba') {
-                rule.weight = parseFloat(document.getElementById('editWeight').value);
-            } else {
-                rule.cep.severity = document.getElementById('editSeverity').value;
-                if (rule.cep.window) {
-                    const val = document.getElementById('editWindowValue').value;
-                    const unit = document.getElementById('editWindowUnit').value;
-                    rule.cep.window = val + unit;
-                }
-                {
-                    const tv = parseInt(document.getElementById('editThreshold').value);
-                    if (rule.cep) rule.cep.threshold = tv;
-                    if (rule.aggregate?.count) rule.aggregate.count.min = tv;
-                }
-            }
-            
-            // 조건 값 업데이트
-            document.querySelectorAll('.cond-value').forEach(input => {
-                const idx = parseInt(input.dataset.idx);
-                let val = parseFloat(input.value);
-                if (input.dataset.unit === 'MB') val *= 1048576;
-                rule.match.conditions[idx].value = val;
-            });
-            document.querySelectorAll('.cond-start').forEach(input => {
-                rule.match.conditions[parseInt(input.dataset.idx)].start = parseInt(input.value);
-            });
-            document.querySelectorAll('.cond-end').forEach(input => {
-                rule.match.conditions[parseInt(input.dataset.idx)].end = parseInt(input.value);
-            });
-            
-            // JSON 텍스트 영역이 최종 소스
             let saveData;
             try {
                 saveData = JSON.parse(document.getElementById('editJson').value);
