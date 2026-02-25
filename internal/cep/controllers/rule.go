@@ -59,9 +59,11 @@ func (c *RuleController) Create(ctx echo.Context) error {
 
 	if enabled, _ := rule["enabled"].(bool); enabled {
 		name, _ := rule["name"].(string)
-		severity, _ := rule["name"].(string)
-		if severity == "" {
-			severity = "MEDIUM"
+		severity := "MEDIUM"
+		if cep, ok := rule["cep"].(map[string]interface{}); ok {
+			if s, ok := cep["severity"].(string); ok && s != "" {
+				severity = s
+			}
 		}
 		c.Flink.SubmitRule(ruleID, name, severity, sql)
 	}
@@ -92,9 +94,11 @@ func (c *RuleController) Update(ctx echo.Context) error {
 
 	if enabled, _ := rule["enabled"].(bool); enabled {
 		name, _ := rule["name"].(string)
-		severity, _ := rule["name"].(string)
-		if severity == "" {
-			severity = "MEDIUM"
+		severity := "MEDIUM"
+		if cep, ok := rule["cep"].(map[string]interface{}); ok {
+			if s, ok := cep["severity"].(string); ok && s != "" {
+				severity = s
+			}
 		}
 		c.Flink.SubmitRule(ruleID, name, severity, sql)
 	} else {
