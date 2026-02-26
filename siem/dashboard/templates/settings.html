@@ -100,14 +100,35 @@
             <div class="tab" data-tab="tiers">등급 임계치</div>
         </div>
 
-        <!-- 이벤트 가중치 -->
+        <!-- UEBA 규칙 (이벤트 가중치) -->
         <div id="weights-panel" class="card p-6">
             <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold">이벤트별 기본 가중치 (Wi)</h2>
-                <span class="text-sm text-gray-500">점수 = Σ(Wi × f(Ci) × Mcontext)</span>
+                <h2 class="text-lg font-semibold">UEBA 규칙 <span id="uebaRuleCount" class="text-xs text-gray-400"></span></h2>
+                <div class="flex gap-2">
+                    <span class="text-sm text-gray-500 mr-4">RuleScore = Σ(Wi × ln(1+Ci))</span>
+                    <button onclick="openUebaRuleModal()" class="btn btn-primary text-sm">+ 규칙 추가</button>
+                </div>
             </div>
-            <div class="grid grid-cols-2 gap-4" id="weights-grid">
-                <!-- JS로 채움 -->
+            <div id="ueba-rules-list"></div>
+        </div>
+
+        <!-- UEBA 규칙 편집 모달 -->
+        <div id="uebaRuleModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;align-items:center;justify-content:center">
+            <div style="background:white;border-radius:12px;padding:24px;width:600px;max-height:80vh;overflow:auto">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold" id="uebaModalTitle">UEBA 규칙</h3>
+                    <button onclick="closeUebaRuleModal()" style="font-size:20px;color:#999">&times;</button>
+                </div>
+                <input type="hidden" id="uebaRuleId">
+                <textarea id="uebaRuleJson" style="width:100%;height:300px;font-family:monospace;font-size:12px;border:1px solid #ddd;border-radius:8px;padding:12px;white-space:pre;tab-size:2"></textarea>
+                <p class="text-xs text-gray-500 mt-1">필수: name, match.msgId, weight, enabled, ueba.enabled</p>
+                <div class="flex justify-between mt-4">
+                    <button onclick="deleteUebaRule()" id="uebaDeleteBtn" class="btn" style="background:#fee2e2;color:#991b1b;display:none">삭제</button>
+                    <div class="flex gap-2">
+                        <button onclick="closeUebaRuleModal()" class="btn" style="background:#f3f4f6">취소</button>
+                        <button onclick="saveUebaRule()" class="btn btn-primary">저장</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -288,24 +309,92 @@
             renderSettings();
         }
 
+        let uebaRules = [];
+
+        async function loadUebaRules() {
+            try {
+                const r = await fetch('/api/safepc-ueba-rules');
+                const data = await r.json();
+                const all = Array.isArray(data) ? data : (data.rules || []);
+                uebaRules = all.filter(r => r.ueba?.enabled);
+                renderUebaRules();
+            } catch(e) { console.log('UEBA rules load error', e); }
+        }
+
+        function renderUebaRules() {
+            const list = document.getElementById('ueba-rules-list');
+            document.getElementById('uebaRuleCount').textContent = `(${uebaRules.length}개)`;
+            if (!uebaRules.length) { list.innerHTML = '<p class="text-gray-400 text-sm">등록된 UEBA 규칙이 없습니다.</p>'; return; }
+            list.innerHTML = uebaRules.sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(r => {
+                const msgId = r.match?.msgId || r.patterns?.[0]?.match?.msgId || '-';
+                const w = r.weight || 0;
+                const agg = r.aggregate?.type || 'count';
+                return `<div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg mb-2 cursor-pointer hover:bg-blue-50" onclick="openUebaRuleModal('${r.id}')">
+                    <div class="flex-1">
+                        <div class="font-medium text-gray-900">${r.name}</div>
+                        <div class="text-xs text-gray-500">${msgId} · ${agg}</div>
+                    </div>
+                    <div class="text-center" style="min-width:60px">
+                        <div class="text-lg font-bold text-blue-600">${w}</div>
+                        <div class="text-xs text-gray-400">가중치</div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function openUebaRuleModal(id) {
+            const modal = document.getElementById('uebaRuleModal');
+            const delBtn = document.getElementById('uebaDeleteBtn');
+            if (id) {
+                const rule = uebaRules.find(r => r.id === id);
+                if (!rule) return;
+                document.getElementById('uebaModalTitle').textContent = '규칙 수정: ' + rule.name;
+                document.getElementById('uebaRuleId').value = id;
+                const j = JSON.parse(JSON.stringify(rule));
+                delete j._id;
+                document.getElementById('uebaRuleJson').value = JSON.stringify(j, null, 2);
+                delBtn.style.display = 'block';
+            } else {
+                document.getElementById('uebaModalTitle').textContent = '새 UEBA 규칙';
+                document.getElementById('uebaRuleId').value = '';
+                document.getElementById('uebaRuleJson').value = JSON.stringify({
+                    name: "", weight: 5, enabled: true,
+                    match: { msgId: "MESSAGE_", conditions: [] },
+                    aggregate: { type: "count" },
+                    ueba: { enabled: true }
+                }, null, 2);
+                delBtn.style.display = 'none';
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeUebaRuleModal() { document.getElementById('uebaRuleModal').style.display = 'none'; }
+
+        async function saveUebaRule() {
+            let data;
+            try { data = JSON.parse(document.getElementById('uebaRuleJson').value); }
+            catch(e) { alert('JSON 오류: ' + e.message); return; }
+            const id = document.getElementById('uebaRuleId').value;
+            try {
+                const url = id ? `/api/safepc-ueba-rules/${id}` : '/api/safepc-ueba-rules';
+                const r = await fetch(url, { method: id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+                if (r.ok) { showToast('저장 완료', 'success'); closeUebaRuleModal(); loadUebaRules(); }
+                else { const e = await r.json(); alert('저장 실패: ' + (e.message||e.error||JSON.stringify(e))); }
+            } catch(e) { alert('저장 실패: ' + e.message); }
+        }
+
+        async function deleteUebaRule() {
+            const id = document.getElementById('uebaRuleId').value;
+            if (!id || !confirm('이 규칙을 삭제하시겠습니까?')) return;
+            try {
+                const r = await fetch(`/api/safepc-ueba-rules/${id}`, { method: 'DELETE' });
+                if (r.ok) { showToast('삭제 완료', 'success'); closeUebaRuleModal(); loadUebaRules(); }
+                else alert('삭제 실패');
+            } catch(e) { alert('삭제 실패: ' + e.message); }
+        }
+
         // 렌더링
         function renderSettings() {
-            // 가중치
-            const wGrid = document.getElementById('weights-grid');
-            wGrid.innerHTML = '';
-            for (const [key, val] of Object.entries(settings.weights)) {
-                wGrid.innerHTML += `
-                    <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                        <div class="flex-1">
-                            <div class="font-medium text-gray-900">${val.name}</div>
-                            <div class="text-xs text-gray-500">${val.msgId}</div>
-                        </div>
-                        <input type="number" min="1" max="10" value="${val.weight}" 
-                            onchange="settings.weights['${key}'].weight = +this.value"
-                            class="w-20 input-field text-center font-semibold">
-                    </div>`;
-            }
-
             // 상황 가중치
             const mGrid = document.getElementById('multipliers-grid');
             mGrid.innerHTML = '';
@@ -378,6 +467,7 @@
         }
 
         loadSettings();
+        loadUebaRules();
     </script>
 </body>
 </html>
