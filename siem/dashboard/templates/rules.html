@@ -281,9 +281,10 @@
 
         // 규칙 로드
         fetch('/api/safepc-ueba-rules').then(r => r.json()).then(data => {
-            const rules = Array.isArray(data) ? data : (data.rules || []);
+            const allRules = Array.isArray(data) ? data : (data.rules || []);
+            const rules = allRules.filter(r => r.cep?.enabled === true);
             rulesData = {};
-            rules.forEach(r => { r.id = r.id || r.ruleId; rulesData[r.id] = r; });
+            allRules.forEach(r => { r.id = r.id || r.ruleId; rulesData[r.id] = r; });
             
             document.getElementById('cepCount').textContent = `(${rules.length})`;
             
