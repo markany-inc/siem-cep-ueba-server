@@ -19,9 +19,54 @@ import (
 )
 
 const (
-	maxRulesSize = 100
-	aggSizeMax   = 65535 // OpenSearch terms agg 최대 bucket 수
+	maxRulesSize      = 100
+	compositePageSize = 1000
 )
+
+// compositeAgg: composite aggregation 페이징으로 전체 유저 집계 (bucket 제한 없음)
+func compositeAgg(index, userField string, query interface{}, subAggs map[string]interface{}, callback func(string, map[string]interface{})) {
+	var afterKey map[string]interface{}
+	for {
+		composite := map[string]interface{}{
+			"size":    compositePageSize,
+			"sources": []interface{}{map[string]interface{}{"user": map[string]interface{}{"terms": map[string]interface{}{"field": userField}}}},
+		}
+		if afterKey != nil {
+			composite["after"] = afterKey
+		}
+		aggs := map[string]interface{}{"users": map[string]interface{}{"composite": composite}}
+		if subAggs != nil {
+			aggs["users"].(map[string]interface{})["aggs"] = subAggs
+		}
+		body, _ := json.Marshal(map[string]interface{}{"size": 0, "query": query, "aggs": aggs})
+		resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, index), "application/json", bytes.NewReader(body))
+		if err != nil {
+			break
+		}
+		var result struct {
+			Aggregations struct {
+				Users struct {
+					AfterKey map[string]interface{} `json:"after_key"`
+					Buckets  []map[string]interface{} `json:"buckets"`
+				} `json:"users"`
+			} `json:"aggregations"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+
+		for _, bucket := range result.Aggregations.Users.Buckets {
+			key, _ := bucket["key"].(map[string]interface{})
+			uid, _ := key["user"].(string)
+			if uid != "" {
+				callback(uid, bucket)
+			}
+		}
+		if len(result.Aggregations.Users.Buckets) < compositePageSize {
+			break
+		}
+		afterKey = result.Aggregations.Users.AfterKey
+	}
+}
 
 var (
 	opensearchURL  string
@@ -214,89 +259,59 @@ func ensureBaselinesFresh() {
 // 오늘 이벤트가 없어도 대시보드에 decay된 점수가 표시됨
 func initUsersFromPrevScores() {
 	today := time.Now().In(loc).Format("2006-01-02")
-	query := map[string]interface{}{
-		"size": 0,
-		"query": map[string]interface{}{
-			"range": map[string]interface{}{
-				"@timestamp": map[string]interface{}{"lt": today, "time_zone": "Asia/Seoul"},
-			},
-		},
-		"aggs": map[string]interface{}{
-			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSizeMax},
-				"aggs": map[string]interface{}{
-					"latest": map[string]interface{}{
-						"top_hits": map[string]interface{}{
-							"size":    1,
-							"sort":    []map[string]interface{}{{"@timestamp": "desc"}},
-							"_source": []string{"riskScore", "@timestamp"},
-						},
-					},
+	now := time.Now().In(loc)
+	count := 0
+
+	compositeAgg(
+		common.ScoresIndexPattern(indexPrefix),
+		"userId.keyword",
+		map[string]interface{}{"range": map[string]interface{}{
+			"@timestamp": map[string]interface{}{"lt": today, "time_zone": "Asia/Seoul"},
+		}},
+		map[string]interface{}{
+			"latest": map[string]interface{}{
+				"top_hits": map[string]interface{}{
+					"size": 1, "sort": []map[string]interface{}{{"@timestamp": "desc"}},
+					"_source": []string{"riskScore", "@timestamp"},
 				},
 			},
 		},
-	}
-	body, _ := json.Marshal(query)
-	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.ScoresIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Aggregations struct {
-			Users struct {
-				Buckets []struct {
-					Key    string `json:"key"`
-					Latest struct {
-						Hits struct {
-							Hits []struct {
-								Source struct {
-									RiskScore float64 `json:"riskScore"`
-									Timestamp string  `json:"@timestamp"`
-								} `json:"_source"`
-							} `json:"hits"`
-						} `json:"hits"`
-					} `json:"latest"`
-				} `json:"buckets"`
-			} `json:"users"`
-		} `json:"aggregations"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	now := time.Now().In(loc)
-	userStatesMu.Lock()
-	for _, bucket := range result.Aggregations.Users.Buckets {
-		uid := bucket.Key
-		if _, exists := userStates[uid]; exists {
-			continue
-		}
-		if len(bucket.Latest.Hits.Hits) == 0 {
-			continue
-		}
-		hit := bucket.Latest.Hits.Hits[0].Source
-		if hit.RiskScore <= 0 {
-			continue
-		}
-		days := 1
-		if t, err := time.Parse(time.RFC3339, hit.Timestamp); err == nil {
-			days = int(now.Sub(t).Hours()/24) + 1
-			if days < 1 {
-				days = 1
+		func(uid string, bucket map[string]interface{}) {
+			// top_hits 결과 파싱
+			latest, _ := bucket["latest"].(map[string]interface{})
+			hits, _ := latest["hits"].(map[string]interface{})
+			hitArr, _ := hits["hits"].([]interface{})
+			if len(hitArr) == 0 {
+				return
 			}
-		}
-		userStates[uid] = &UserState{
-			PrevScore:    hit.RiskScore,
-			DaysSinceLast: days,
-			EventCounts:  make(map[string]int),
-			EventValues:  make(map[string]float64),
-			RuleScores:   make(map[string]float64),
-			LastUpdated:  now,
-			Dirty:        true,
-		}
-	}
-	userStatesMu.Unlock()
-	log.Printf("[INIT] %d명 이전 점수 유저 초기화", len(result.Aggregations.Users.Buckets))
+			hit, _ := hitArr[0].(map[string]interface{})
+			src, _ := hit["_source"].(map[string]interface{})
+			score := toFloat64(src["riskScore"])
+			if score <= 0 {
+				return
+			}
+			days := 1
+			if ts, ok := src["@timestamp"].(string); ok {
+				if t, err := time.Parse(time.RFC3339, ts); err == nil {
+					days = int(now.Sub(t).Hours()/24) + 1
+					if days < 1 {
+						days = 1
+					}
+				}
+			}
+			userStatesMu.Lock()
+			if _, exists := userStates[uid]; !exists {
+				userStates[uid] = &UserState{
+					PrevScore: score, DaysSinceLast: days,
+					EventCounts: make(map[string]int), EventValues: make(map[string]float64),
+					RuleScores: make(map[string]float64), LastUpdated: now, Dirty: true,
+				}
+				count++
+			}
+			userStatesMu.Unlock()
+		},
+	)
+	log.Printf("[INIT] %d명 이전 점수 유저 초기화", count)
 }
 
 func recoverTodayState() {
@@ -337,127 +352,104 @@ func recoverRuleAgg(rule Rule, today string) {
 	if esQuery == nil {
 		return
 	}
+	queryPart := esQuery["query"]
 
-	// aggregate 타입에 따른 agg 구성
-	userAgg := map[string]interface{}{
-		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSizeMax},
-	}
+	var subAggs map[string]interface{}
 	switch rule.Aggregate.Type {
 	case "sum":
 		if rule.Aggregate.Field == "" {
 			return
 		}
-		// CEF extension 필드는 cefExtensions.{field} 경로
-		aggField := resolveAggField(rule.Aggregate.Field)
-		userAgg["aggs"] = map[string]interface{}{
-			"val": map[string]interface{}{"sum": map[string]interface{}{"field": aggField}},
-		}
+		subAggs = map[string]interface{}{"val": map[string]interface{}{"sum": map[string]interface{}{"field": resolveAggField(rule.Aggregate.Field)}}}
 	case "cardinality":
 		if rule.Aggregate.Field == "" {
 			return
 		}
-		aggField := resolveAggField(rule.Aggregate.Field)
-		userAgg["aggs"] = map[string]interface{}{
-			"val": map[string]interface{}{"cardinality": map[string]interface{}{"field": aggField}},
-		}
-	default: // count — doc_count 사용
+		subAggs = map[string]interface{}{"val": map[string]interface{}{"cardinality": map[string]interface{}{"field": resolveAggField(rule.Aggregate.Field)}}}
 	}
 
-	esQuery["size"] = 0
-	esQuery["aggs"] = map[string]interface{}{"users": userAgg}
-
-	body, _ := json.Marshal(esQuery)
-	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.LogsIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
-	if err != nil {
-		log.Printf("[WARN] 룰 '%s' aggregation 실패: %v", rule.Name, err)
-		return
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Aggregations struct {
-			Users struct {
-				Buckets []struct {
-					Key      string `json:"key"`
-					DocCount int    `json:"doc_count"`
-					Val      struct {
-						Value float64 `json:"value"`
-					} `json:"val"`
-				} `json:"buckets"`
-			} `json:"users"`
-		} `json:"aggregations"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	userStatesMu.Lock()
-	for _, bucket := range result.Aggregations.Users.Buckets {
-		uid := bucket.Key
-		state := getOrCreateState(uid)
-		switch rule.Aggregate.Type {
-		case "sum":
-			state.EventValues[rule.Name] = bucket.Val.Value
-		case "cardinality":
-			state.EventValues[rule.Name] = bucket.Val.Value
-		default:
-			state.EventValues[rule.Name] = float64(bucket.DocCount)
-		}
-	}
-	userStatesMu.Unlock()
-	log.Printf("[INIT] 룰 '%s': %d명 집계", rule.Name, len(result.Aggregations.Users.Buckets))
+	count := 0
+	compositeAgg(
+		common.LogsIndexPattern(indexPrefix),
+		"cefExtensions.suid.keyword",
+		queryPart,
+		subAggs,
+		func(uid string, bucket map[string]interface{}) {
+			userStatesMu.Lock()
+			state := getOrCreateState(uid)
+			switch rule.Aggregate.Type {
+			case "sum", "cardinality":
+				if val, ok := bucket["val"].(map[string]interface{}); ok {
+					state.EventValues[rule.Name] = toFloat64(val["value"])
+				}
+			default:
+				state.EventValues[rule.Name] = toFloat64(bucket["doc_count"])
+			}
+			userStatesMu.Unlock()
+			count++
+		},
+	)
+	log.Printf("[INIT] 룰 '%s': %d명 집계", rule.Name, count)
 }
 
 // recoverEventCounts: anomaly 계산용 — msgId별 유저별 이벤트 카운트
 func recoverEventCounts(today string) {
-	query := map[string]interface{}{
-		"size": 0,
-		"query": map[string]interface{}{
-			"range": map[string]interface{}{
-				"@timestamp": map[string]interface{}{"gte": today, "lt": today + "||+1d"},
-			},
-		},
-		"aggs": map[string]interface{}{
-			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSizeMax},
-				"aggs": map[string]interface{}{
-					"msgs": map[string]interface{}{
-						"terms": map[string]interface{}{"field": "msgId.keyword", "size": 100},
-					},
-				},
-			},
+	queryPart := map[string]interface{}{
+		"range": map[string]interface{}{
+			"@timestamp": map[string]interface{}{"gte": today, "lt": today + "||+1d"},
 		},
 	}
-	body, _ := json.Marshal(query)
-	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.LogsIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Aggregations struct {
-			Users struct {
-				Buckets []struct {
-					Key  string `json:"key"`
-					Msgs struct {
-						Buckets []struct {
-							Key      string `json:"key"`
-							DocCount int    `json:"doc_count"`
-						} `json:"buckets"`
-					} `json:"msgs"`
-				} `json:"buckets"`
-			} `json:"users"`
-		} `json:"aggregations"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	userStatesMu.Lock()
-	for _, ub := range result.Aggregations.Users.Buckets {
-		state := getOrCreateState(ub.Key)
-		for _, mb := range ub.Msgs.Buckets {
-			state.EventCounts[mb.Key] = mb.DocCount
+	var afterKey map[string]interface{}
+	for {
+		composite := map[string]interface{}{
+			"size": compositePageSize,
+			"sources": []interface{}{
+				map[string]interface{}{"user": map[string]interface{}{"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword"}}},
+				map[string]interface{}{"msg": map[string]interface{}{"terms": map[string]interface{}{"field": "msgId.keyword"}}},
+			},
 		}
+		if afterKey != nil {
+			composite["after"] = afterKey
+		}
+		body, _ := json.Marshal(map[string]interface{}{
+			"size": 0, "query": queryPart,
+			"aggs": map[string]interface{}{"pairs": map[string]interface{}{"composite": composite}},
+		})
+		resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.LogsIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
+		if err != nil {
+			break
+		}
+		var result struct {
+			Aggregations struct {
+				Pairs struct {
+					AfterKey map[string]interface{} `json:"after_key"`
+					Buckets  []struct {
+						Key      map[string]interface{} `json:"key"`
+						DocCount int                    `json:"doc_count"`
+					} `json:"buckets"`
+				} `json:"pairs"`
+			} `json:"aggregations"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+
+		userStatesMu.Lock()
+		for _, b := range result.Aggregations.Pairs.Buckets {
+			uid, _ := b.Key["user"].(string)
+			msgId, _ := b.Key["msg"].(string)
+			if uid == "" || msgId == "" {
+				continue
+			}
+			state := getOrCreateState(uid)
+			state.EventCounts[msgId] = b.DocCount
+		}
+		userStatesMu.Unlock()
+
+		if len(result.Aggregations.Pairs.Buckets) < compositePageSize {
+			break
+		}
+		afterKey = result.Aggregations.Pairs.AfterKey
 	}
-	userStatesMu.Unlock()
 }
 
 // getOrCreateState: 유저 상태 가져오기 (없으면 생성). Lock 보유 상태에서 호출
@@ -1845,23 +1837,6 @@ func GetUserScores(draw, start, length int, search, sortField, orderDir string) 
 		orderDir = "desc"
 	}
 
-	result, err := esQuery(common.ScoresIndexPattern(indexPrefix), map[string]interface{}{
-		"size": 0,
-		"aggs": map[string]interface{}{
-			"byUser": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSizeMax},
-				"aggs": map[string]interface{}{
-					"recent": map[string]interface{}{
-						"top_hits": map[string]interface{}{"size": 1, "sort": []map[string]interface{}{{"@timestamp": "desc"}}},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		return map[string]interface{}{"draw": draw, "recordsTotal": 0, "recordsFiltered": 0, "data": []interface{}{}}
-	}
-
 	type userRow struct {
 		UserID   string
 		Score    float64
@@ -1869,28 +1844,38 @@ func GetUserScores(draw, start, length int, search, sortField, orderDir string) 
 		Features map[string]interface{}
 	}
 	var users []userRow
-	aggs, _ := result["aggregations"].(map[string]interface{})
-	byUser, _ := aggs["byUser"].(map[string]interface{})
-	buckets, _ := byUser["buckets"].([]interface{})
-	for _, bkt := range buckets {
-		b, _ := bkt.(map[string]interface{})
-		recent, _ := b["recent"].(map[string]interface{})
-		hits, _ := recent["hits"].(map[string]interface{})
-		hitArr, _ := hits["hits"].([]interface{})
-		if len(hitArr) == 0 {
-			continue
-		}
-		h, _ := hitArr[0].(map[string]interface{})
-		src, _ := h["_source"].(map[string]interface{})
-		uid, _ := src["userId"].(string)
-		if search != "" && !strings.Contains(strings.ToLower(uid), strings.ToLower(search)) {
-			continue
-		}
-		score, _ := src["riskScore"].(float64)
-		level, _ := src["riskLevel"].(string)
-		features, _ := src["features"].(map[string]interface{})
-		users = append(users, userRow{uid, score, level, features})
-	}
+
+	compositeAgg(
+		common.ScoresIndexPattern(indexPrefix),
+		"userId.keyword",
+		map[string]interface{}{"match_all": map[string]interface{}{}},
+		map[string]interface{}{
+			"recent": map[string]interface{}{
+				"top_hits": map[string]interface{}{"size": 1, "sort": []map[string]interface{}{{"@timestamp": "desc"}}},
+			},
+		},
+		func(uid string, bucket map[string]interface{}) {
+			recent, _ := bucket["recent"].(map[string]interface{})
+			hits, _ := recent["hits"].(map[string]interface{})
+			hitArr, _ := hits["hits"].([]interface{})
+			if len(hitArr) == 0 {
+				return
+			}
+			h, _ := hitArr[0].(map[string]interface{})
+			src, _ := h["_source"].(map[string]interface{})
+			realUID, _ := src["userId"].(string)
+			if realUID == "" {
+				realUID = uid
+			}
+			if search != "" && !strings.Contains(strings.ToLower(realUID), strings.ToLower(search)) {
+				return
+			}
+			score, _ := src["riskScore"].(float64)
+			level, _ := src["riskLevel"].(string)
+			features, _ := src["features"].(map[string]interface{})
+			users = append(users, userRow{realUID, score, level, features})
+		},
+	)
 
 	// 정렬
 	if sortField == "riskScore" || sortField == "" {
