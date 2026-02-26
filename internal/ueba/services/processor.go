@@ -567,8 +567,23 @@ func hourToESClause(cond RuleCondition) interface{} {
 	case "in":
 		vals, _ := json.Marshal(cond.Value)
 		return scriptQ(fmt.Sprintf("%s.contains(%s)", string(vals), h))
+	case "time_range":
+		start, end := toInt(cond.Value, "start"), toInt(cond.Value, "end")
+		if start > end {
+			return scriptQ(fmt.Sprintf("%s >= %d || %s < %d", h, start, h, end))
+		}
+		return scriptQ(fmt.Sprintf("%s >= %d && %s < %d", h, start, h, end))
 	}
 	return nil
+}
+
+func toInt(v interface{}, key string) int {
+	if m, ok := v.(map[string]interface{}); ok {
+		if n, ok := m[key].(float64); ok {
+			return int(n)
+		}
+	}
+	return 0
 }
 
 func scriptQ(script string) interface{} {
@@ -933,6 +948,13 @@ func evaluateCondition(event map[string]interface{}, cond RuleCondition) bool {
 		return containsString(fieldValue, cond.Value)
 	case "in":
 		return inArray(fieldValue, cond.Value)
+	case "time_range":
+		h := int(toFloat64(fieldValue))
+		start, end := toInt(cond.Value, "start"), toInt(cond.Value, "end")
+		if start > end {
+			return h >= start || h < end
+		}
+		return h >= start && h < end
 	}
 	return false
 }
@@ -1632,7 +1654,7 @@ func validateRule(data map[string]interface{}) []string {
 	if _, ok := match["msgId"].(string); !ok || match["msgId"] == "" {
 		errs = append(errs, "match.msgId 필수")
 	}
-	validOps := map[string]bool{"eq": true, "neq": true, "gt": true, "gte": true, "lt": true, "lte": true, "contains": true, "in": true}
+	validOps := map[string]bool{"eq": true, "neq": true, "gt": true, "gte": true, "lt": true, "lte": true, "contains": true, "in": true, "time_range": true}
 	if conds, ok := match["conditions"].([]interface{}); ok {
 		for i, raw := range conds {
 			c, _ := raw.(map[string]interface{})
