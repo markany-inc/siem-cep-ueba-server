@@ -145,35 +145,37 @@ func (c *FieldMetaController) analyzeEvent(msgID string) []string {
 	// 1. Mapping API로 cefExtensions 하위 필드 목록 조회
 	mappingFields := c.getFieldsFromMapping()
 
-	// 2. 샘플 1건으로 Label→이름 매핑 확인
+	// 2. *Label 키와 대응 raw 키(cs1, cn1 등) 제외
+	labelRawKeys := make(map[string]bool)
+	for _, f := range mappingFields {
+		if strings.HasSuffix(f, "Label") {
+			labelRawKeys[f] = true                        // cs1Label
+			labelRawKeys[strings.TrimSuffix(f, "Label")] = true // cs1
+		}
+	}
+
+	// 3. 샘플 1건으로 Label→이름 매핑 확인
 	docs, _ := c.OS.Search(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
 		"size":  1,
 		"query": map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
 	})
 
 	fieldSet := make(map[string]bool)
-	labelKeys := make(map[string]bool)
-
-	// 샘플에서 Label 매핑 추출
 	if len(docs) > 0 {
 		if cef, ok := docs[0]["cefExtensions"].(map[string]interface{}); ok {
 			for k, v := range cef {
 				if strings.HasSuffix(k, "Label") {
 					if label, ok := v.(string); ok && label != "" {
 						fieldSet[strings.ReplaceAll(label, " ", "")] = true
-						labelKeys[strings.TrimSuffix(k, "Label")] = true
 					}
 				}
 			}
 		}
 	}
 
-	// Mapping 필드 중 Label이 아니고 raw 키도 아닌 것 추가
+	// 4. Mapping 필드 중 Label/raw 키 제외하고 추가
 	for _, f := range mappingFields {
-		if strings.HasSuffix(f, "Label") {
-			continue
-		}
-		if labelKeys[f] {
+		if labelRawKeys[f] {
 			continue
 		}
 		fieldSet[f] = true
