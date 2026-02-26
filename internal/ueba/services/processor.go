@@ -89,6 +89,8 @@ type RuleCondition struct {
 	Field string      `json:"field"`
 	Op    string      `json:"op"`
 	Value interface{} `json:"value"`
+	Start interface{} `json:"start,omitempty"`
+	End   interface{} `json:"end,omitempty"`
 }
 
 // RuleAggregate: 룰이 매칭된 이벤트에서 무엇을 집계할지 정의
@@ -302,118 +304,25 @@ func initUsersFromPrevScores() {
 
 func recoverTodayState() {
 	today := time.Now().In(loc).Format("2006-01-02")
-	log.Printf("[INIT] 오늘(%s) 로그에서 상태 복구 중...", today)
+	log.Printf("[INIT] 오늘(%s) aggregation 기반 상태 복구 중...", today)
 
 	// 1) 어제까지 점수가 있는 유저를 decay 적용하여 초기화
 	initUsersFromPrevScores()
 
 	rules := loadRules()
-	batchSize := recoverBatch
-	var searchAfter []interface{}
-	totalProcessed := 0
 
-	for {
-		query := map[string]interface{}{
-			"size": batchSize,
-			"sort": []map[string]interface{}{{"@timestamp": "asc"}, {"_id": "asc"}},
-			"query": map[string]interface{}{
-				"range": map[string]interface{}{
-					"@timestamp": map[string]interface{}{"gte": today, "lt": today + "||+1d"},
-				},
-			},
+	// 2) 룰별 OpenSearch aggregation으로 유저별 집계값 조회
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
 		}
-		if searchAfter != nil {
-			query["search_after"] = searchAfter
-		}
-
-		body, _ := json.Marshal(query)
-		resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.LogsIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
-		if err != nil {
-			log.Printf("[WARN] 오늘치 로그 조회 실패: %v", err)
-			break
-		}
-
-		var result struct {
-			Hits struct {
-				Hits []struct {
-					Source json.RawMessage `json:"_source"`
-					Sort   []interface{}  `json:"sort"`
-				} `json:"hits"`
-			} `json:"hits"`
-		}
-		json.NewDecoder(resp.Body).Decode(&result)
-		resp.Body.Close()
-
-		if len(result.Hits.Hits) == 0 {
-			break
-		}
-
-		userStatesMu.Lock()
-		for _, hit := range result.Hits.Hits {
-			var event map[string]interface{}
-			json.Unmarshal(hit.Source, &event)
-
-			userID, _ := event["userId"].(string)
-			if userID == "" {
-				if ext, ok := event["cefExtensions"].(map[string]interface{}); ok {
-					userID, _ = ext["suid"].(string)
-				}
-			}
-			if userID == "" {
-				continue
-			}
-			msgId, _ := event["msgId"].(string)
-			if msgId == "" {
-				continue
-			}
-
-			state, exists := userStates[userID]
-			if !exists {
-				state = &UserState{
-					EventCounts:  make(map[string]int),
-					EventValues:  make(map[string]float64),
-					RuleScores:   make(map[string]float64),
-					LastUpdated:  time.Now(),
-				}
-				state.PrevScore, state.DaysSinceLast = getPrevScore(userID)
-				userStates[userID] = state
-			}
-
-			state.EventCounts[msgId]++
-
-			// CEF 파싱 + 룰 매칭
-			event["_attrs"] = parseCEFAttrs(event)
-			for _, rule := range rules {
-				if !rule.Enabled || !matchEvent(event, rule) {
-					continue
-				}
-				ruleKey := rule.Name
-				switch rule.Aggregate.Type {
-				case "sum":
-					val := toFloat64(getFieldValue(event, rule.Aggregate.Field))
-					state.EventValues[ruleKey] += val
-				case "cardinality":
-					val := fmt.Sprintf("%v", getFieldValue(event, rule.Aggregate.Field))
-					cardKey := ruleKey + "::" + val
-					if state.EventValues[cardKey] == 0 {
-						state.EventValues[cardKey] = 1
-						state.EventValues[ruleKey]++
-					}
-				default:
-					state.EventValues[ruleKey]++
-				}
-			}
-			totalProcessed++
-		}
-		userStatesMu.Unlock()
-
-		searchAfter = result.Hits.Hits[len(result.Hits.Hits)-1].Sort
-		if len(result.Hits.Hits) < batchSize {
-			break
-		}
+		recoverRuleAgg(rule, today)
 	}
 
-	// 전체 유저 점수 계산
+	// 3) anomaly용: msgId별 유저별 이벤트 카운트 (baseline 비교용)
+	recoverEventCounts(today)
+
+	// 4) 전체 유저 점수 계산
 	userStatesMu.Lock()
 	for userID, state := range userStates {
 		state.Dirty = true
@@ -421,10 +330,280 @@ func recoverTodayState() {
 	}
 	userStatesMu.Unlock()
 
-	log.Printf("[INIT] %d명 유저, %d건 이벤트 복구 완료", len(userStates), totalProcessed)
-
-	// 복구된 상태를 즉시 scores에 저장 (대시보드 표시용)
+	log.Printf("[INIT] %d명 유저 복구 완료 (aggregation)", len(userStates))
 	saveScoresBatch()
+}
+
+// recoverRuleAgg: 단일 룰에 대해 유저별 집계값을 OpenSearch aggregation으로 조회
+func recoverRuleAgg(rule Rule, today string) {
+	esQuery := buildRuleESQuery(rule, today)
+	if esQuery == nil {
+		return
+	}
+
+	// aggregate 타입에 따른 agg 구성
+	userAgg := map[string]interface{}{
+		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": maxUsersAggSize},
+	}
+	switch rule.Aggregate.Type {
+	case "sum":
+		if rule.Aggregate.Field == "" {
+			return
+		}
+		// CEF extension 필드는 cefExtensions.{field} 경로
+		aggField := resolveAggField(rule.Aggregate.Field)
+		userAgg["aggs"] = map[string]interface{}{
+			"val": map[string]interface{}{"sum": map[string]interface{}{"field": aggField}},
+		}
+	case "cardinality":
+		if rule.Aggregate.Field == "" {
+			return
+		}
+		aggField := resolveAggField(rule.Aggregate.Field)
+		userAgg["aggs"] = map[string]interface{}{
+			"val": map[string]interface{}{"cardinality": map[string]interface{}{"field": aggField}},
+		}
+	default: // count — doc_count 사용
+	}
+
+	esQuery["size"] = 0
+	esQuery["aggs"] = map[string]interface{}{"users": userAgg}
+
+	body, _ := json.Marshal(esQuery)
+	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.LogsIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[WARN] 룰 '%s' aggregation 실패: %v", rule.Name, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Aggregations struct {
+			Users struct {
+				Buckets []struct {
+					Key      string `json:"key"`
+					DocCount int    `json:"doc_count"`
+					Val      struct {
+						Value float64 `json:"value"`
+					} `json:"val"`
+				} `json:"buckets"`
+			} `json:"users"`
+		} `json:"aggregations"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	userStatesMu.Lock()
+	for _, bucket := range result.Aggregations.Users.Buckets {
+		uid := bucket.Key
+		state := getOrCreateState(uid)
+		switch rule.Aggregate.Type {
+		case "sum":
+			state.EventValues[rule.Name] = bucket.Val.Value
+		case "cardinality":
+			state.EventValues[rule.Name] = bucket.Val.Value
+		default:
+			state.EventValues[rule.Name] = float64(bucket.DocCount)
+		}
+	}
+	userStatesMu.Unlock()
+	log.Printf("[INIT] 룰 '%s': %d명 집계", rule.Name, len(result.Aggregations.Users.Buckets))
+}
+
+// recoverEventCounts: anomaly 계산용 — msgId별 유저별 이벤트 카운트
+func recoverEventCounts(today string) {
+	query := map[string]interface{}{
+		"size": 0,
+		"query": map[string]interface{}{
+			"range": map[string]interface{}{
+				"@timestamp": map[string]interface{}{"gte": today, "lt": today + "||+1d"},
+			},
+		},
+		"aggs": map[string]interface{}{
+			"users": map[string]interface{}{
+				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": maxUsersAggSize},
+				"aggs": map[string]interface{}{
+					"msgs": map[string]interface{}{
+						"terms": map[string]interface{}{"field": "msgId.keyword", "size": 100},
+					},
+				},
+			},
+		},
+	}
+	body, _ := json.Marshal(query)
+	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.LogsIndexPattern(indexPrefix)), "application/json", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Aggregations struct {
+			Users struct {
+				Buckets []struct {
+					Key  string `json:"key"`
+					Msgs struct {
+						Buckets []struct {
+							Key      string `json:"key"`
+							DocCount int    `json:"doc_count"`
+						} `json:"buckets"`
+					} `json:"msgs"`
+				} `json:"buckets"`
+			} `json:"users"`
+		} `json:"aggregations"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	userStatesMu.Lock()
+	for _, ub := range result.Aggregations.Users.Buckets {
+		state := getOrCreateState(ub.Key)
+		for _, mb := range ub.Msgs.Buckets {
+			state.EventCounts[mb.Key] = mb.DocCount
+		}
+	}
+	userStatesMu.Unlock()
+}
+
+// getOrCreateState: 유저 상태 가져오기 (없으면 생성). Lock 보유 상태에서 호출
+func getOrCreateState(uid string) *UserState {
+	state, exists := userStates[uid]
+	if !exists {
+		prevScore, days := getPrevScore(uid)
+		state = &UserState{
+			EventCounts:   make(map[string]int),
+			EventValues:   make(map[string]float64),
+			RuleScores:    make(map[string]float64),
+			PrevScore:     prevScore,
+			DaysSinceLast: days,
+			LastUpdated:   time.Now(),
+		}
+		userStates[uid] = state
+	}
+	return state
+}
+
+// buildRuleESQuery: UEBA 룰의 match 조건을 OpenSearch bool 쿼리로 변환
+func buildRuleESQuery(rule Rule, today string) map[string]interface{} {
+	must := []interface{}{
+		map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": rule.Match.MsgID}},
+		map[string]interface{}{"range": map[string]interface{}{
+			"@timestamp": map[string]interface{}{"gte": today, "lt": today + "||+1d"},
+		}},
+	}
+
+	for _, cond := range rule.Match.Conditions {
+		clause := conditionToESClause(cond)
+		if clause != nil {
+			must = append(must, clause)
+		}
+	}
+
+	logic := strings.ToLower(rule.Match.Logic)
+	if logic == "or" && len(rule.Match.Conditions) > 1 {
+		// OR: should 절로
+		should := []interface{}{}
+		for _, cond := range rule.Match.Conditions {
+			if c := conditionToESClause(cond); c != nil {
+				should = append(should, c)
+			}
+		}
+		return map[string]interface{}{
+			"query": map[string]interface{}{
+				"bool": map[string]interface{}{
+					"must": []interface{}{
+						map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": rule.Match.MsgID}},
+						map[string]interface{}{"range": map[string]interface{}{
+							"@timestamp": map[string]interface{}{"gte": today, "lt": today + "||+1d"},
+						}},
+					},
+					"should":               should,
+					"minimum_should_match": 1,
+				},
+			},
+		}
+	}
+
+	return map[string]interface{}{
+		"query": map[string]interface{}{
+			"bool": map[string]interface{}{"must": must},
+		},
+	}
+}
+
+// conditionToESClause: 단일 condition → OpenSearch 쿼리 절
+func conditionToESClause(cond RuleCondition) interface{} {
+	field := resolveESField(cond.Field)
+	switch cond.Op {
+	case "eq":
+		return map[string]interface{}{"term": map[string]interface{}{field: cond.Value}}
+	case "neq":
+		return map[string]interface{}{"bool": map[string]interface{}{
+			"must_not": []interface{}{map[string]interface{}{"term": map[string]interface{}{field: cond.Value}}},
+		}}
+	case "gt":
+		return map[string]interface{}{"range": map[string]interface{}{field: map[string]interface{}{"gt": cond.Value}}}
+	case "gte":
+		return map[string]interface{}{"range": map[string]interface{}{field: map[string]interface{}{"gte": cond.Value}}}
+	case "lt":
+		return map[string]interface{}{"range": map[string]interface{}{field: map[string]interface{}{"lt": cond.Value}}}
+	case "lte":
+		return map[string]interface{}{"range": map[string]interface{}{field: map[string]interface{}{"lte": cond.Value}}}
+	case "in":
+		return map[string]interface{}{"terms": map[string]interface{}{field: cond.Value}}
+	case "contains":
+		return map[string]interface{}{"wildcard": map[string]interface{}{field: fmt.Sprintf("*%v*", cond.Value)}}
+	case "time_range":
+		start, end := extractTimeRange(cond)
+		if start <= end {
+			return map[string]interface{}{"script": map[string]interface{}{
+				"script": fmt.Sprintf("doc['@timestamp'].value.getHour() >= %d && doc['@timestamp'].value.getHour() < %d", start, end),
+			}}
+		}
+		// 야간 (22~6): OR 조건
+		return map[string]interface{}{"script": map[string]interface{}{
+			"script": fmt.Sprintf("doc['@timestamp'].value.getHour() >= %d || doc['@timestamp'].value.getHour() < %d", start, end),
+		}}
+	}
+	return nil
+}
+
+// extractTimeRange: time_range 조건에서 start/end 추출
+func extractTimeRange(cond RuleCondition) (int, int) {
+	// 1) struct 필드에서
+	if cond.Start != nil && cond.End != nil {
+		return int(toFloat64(cond.Start)), int(toFloat64(cond.End))
+	}
+	// 2) value가 map이면
+	if m, ok := cond.Value.(map[string]interface{}); ok {
+		return int(toFloat64(m["start"])), int(toFloat64(m["end"]))
+	}
+	// 3) value가 JSON 문자열이면
+	if s, ok := cond.Value.(string); ok {
+		var m map[string]interface{}
+		if json.Unmarshal([]byte(s), &m) == nil {
+			return int(toFloat64(m["start"])), int(toFloat64(m["end"]))
+		}
+	}
+	return 0, 0
+}
+
+// resolveESField: UEBA 필드명 → OpenSearch 필드 경로
+func resolveESField(field string) string {
+	// 최상위 필드
+	top := map[string]bool{"msgId": true, "hostname": true, "eventType": true, "@timestamp": true, "severity": true}
+	if top[field] {
+		return field + ".keyword"
+	}
+	if field == "@timestamp" {
+		return field
+	}
+	// 나머지는 cefExtensions 내부
+	return "cefExtensions." + field + ".keyword"
+}
+
+// resolveAggField: sum/cardinality 대상 필드 → OpenSearch 경로
+func resolveAggField(field string) string {
+	// 숫자 필드는 .keyword 불필요
+	return "cefExtensions." + field
 }
 
 func loadAllBaselines() {
@@ -887,20 +1066,7 @@ func checkTimeRange(event map[string]interface{}, cond RuleCondition) bool {
 		return false
 	}
 	hour := t.In(loc).Hour()
-
-	// value가 map이면 직접 사용, 문자열이면 JSON 파싱
-	var start, end int
-	switch v := cond.Value.(type) {
-	case map[string]interface{}:
-		start = int(toFloat64(v["start"]))
-		end = int(toFloat64(v["end"]))
-	case string:
-		var m map[string]interface{}
-		if json.Unmarshal([]byte(v), &m) == nil {
-			start = int(toFloat64(m["start"]))
-			end = int(toFloat64(m["end"]))
-		}
-	}
+	start, end := extractTimeRange(cond)
 
 	if start <= end {
 		return hour >= start && hour <= end
@@ -1436,17 +1602,40 @@ func DeleteRule(id string) error {
 	return nil
 }
 
-// reloadAndReprocess: 룰 변경 후 캐시 갱신 + 오늘 이벤트 재처리
+// reloadAndReprocess: 룰 변경 후 캐시 갱신 + 해당 룰만 재집계
 func reloadAndReprocess() {
 	ReloadCache()
 	go func() {
-		log.Printf("[RULE] 룰 변경 → 오늘 이벤트 재처리 시작")
-		// 기존 상태 초기화 후 오늘 이벤트 전체 재처리
+		today := time.Now().In(loc).Format("2006-01-02")
+		rules := loadRules()
+		log.Printf("[RULE] 룰 변경 → %d개 룰 재집계 시작", len(rules))
+
+		// 룰별 EventValues 초기화 후 재집계
 		userStatesMu.Lock()
-		userStates = make(map[string]*UserState)
+		for _, state := range userStates {
+			for _, rule := range rules {
+				delete(state.EventValues, rule.Name)
+			}
+		}
 		userStatesMu.Unlock()
-		recoverTodayState()
-		log.Printf("[RULE] 오늘 이벤트 재처리 완료 (%d명)", len(userStates))
+
+		for _, rule := range rules {
+			if !rule.Enabled {
+				continue
+			}
+			recoverRuleAgg(rule, today)
+		}
+
+		// 전체 유저 점수 재계산
+		userStatesMu.Lock()
+		for userID, state := range userStates {
+			state.Dirty = true
+			calculateStateScore(userID, state)
+		}
+		userStatesMu.Unlock()
+
+		saveScoresBatch()
+		log.Printf("[RULE] 재집계 완료 (%d명)", len(userStates))
 	}()
 }
 
