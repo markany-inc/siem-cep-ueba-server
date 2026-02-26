@@ -142,11 +142,18 @@ func (c *FieldMetaController) AnalyzeField(ctx echo.Context) error {
 
 // analyzeEvent - 해당 msgId 문서에서 실제 존재하는 필드만 추출
 func (c *FieldMetaController) analyzeEvent(msgID string) []string {
-	// 해당 msgId 문서 샘플링 (최근 100건으로 필드 커버리지 확보)
+	// 7일간 샘플 수집 (_source 제한으로 네트워크 부하 최소화)
 	docs, _ := c.OS.Search(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
-		"size":  100,
-		"query": map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
-		"sort":  []map[string]string{{"@timestamp": "desc"}},
+		"size": 200,
+		"query": map[string]interface{}{
+			"bool": map[string]interface{}{
+				"must": []interface{}{
+					map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
+					map[string]interface{}{"range": map[string]interface{}{"@timestamp": map[string]string{"gte": "now-7d"}}},
+				},
+			},
+		},
+		"_source": []string{"cefExtensions"},
 	})
 
 	fieldSet := make(map[string]bool)
