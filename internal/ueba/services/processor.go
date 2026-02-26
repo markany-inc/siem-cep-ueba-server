@@ -833,14 +833,19 @@ func calculateStateScore(userID string, state *UserState) {
 		if bl == nil || bl.SampleDays < cfg.Anomaly.ColdStartMinDays {
 			continue
 		}
+		// mean이 0이면 anomaly 계산 제외 (데이터 부족)
+		if bl.Mean < 1 {
+			continue
+		}
 		stddev := math.Max(bl.Stddev, cfg.Anomaly.SigmaFloor)
 		z := (float64(count) - bl.Mean) / stddev
 		if z > cfg.Anomaly.ZThreshold {
 			excess := cfg.Anomaly.Beta * (z - cfg.Anomaly.ZThreshold)
+			// anomaly 점수 상한: 이벤트당 최대 50점
+			excess = math.Min(excess, 50)
 			if ruleMsgIDs[msgID] {
 				anomalyScore += excess
 			} else {
-				// 룰 미등록 이벤트 급증 — 점수 반영 없이 로그만
 				log.Printf("[ANOMALY-INFO] %s: %s 급증 (count=%d mean=%.1f z=%.1f)", userID, msgID, count, bl.Mean, z)
 			}
 		}
