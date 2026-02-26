@@ -520,6 +520,10 @@ func buildRuleESQuery(rule Rule, today string) map[string]interface{} {
 
 // conditionToESClause: 단일 condition → OpenSearch 쿼리 절
 func conditionToESClause(cond RuleCondition) interface{} {
+	// hour: 가상 필드 → script query
+	if cond.Field == "hour" {
+		return hourToESClause(cond)
+	}
 	field := resolveESField(cond.Field)
 	switch cond.Op {
 	case "eq":
@@ -540,48 +544,46 @@ func conditionToESClause(cond RuleCondition) interface{} {
 		return map[string]interface{}{"terms": map[string]interface{}{field: cond.Value}}
 	case "contains":
 		return map[string]interface{}{"wildcard": map[string]interface{}{field: fmt.Sprintf("*%v*", cond.Value)}}
-	case "time_range":
-		start, end := extractTimeRange(cond)
-		if start <= end {
-			return map[string]interface{}{"script": map[string]interface{}{
-				"script": fmt.Sprintf("doc['@timestamp'].value.getHour() >= %d && doc['@timestamp'].value.getHour() < %d", start, end),
-			}}
-		}
-		// 야간 (22~6): OR 조건
-		return map[string]interface{}{"script": map[string]interface{}{
-			"script": fmt.Sprintf("doc['@timestamp'].value.getHour() >= %d || doc['@timestamp'].value.getHour() < %d", start, end),
-		}}
 	}
 	return nil
 }
 
-// extractTimeRange: time_range 조건에서 start/end 추출
-func extractTimeRange(cond RuleCondition) (int, int) {
-	// value가 map이면 (loadRules에서 raw JSON 보충)
-	if m, ok := cond.Value.(map[string]interface{}); ok {
-		return int(toFloat64(m["start"])), int(toFloat64(m["end"]))
+// hourToESClause: hour 가상 필드 → OpenSearch script query
+func hourToESClause(cond RuleCondition) interface{} {
+	h := "doc['@timestamp'].value.withZoneSameInstant(ZoneId.of('Asia/Seoul')).getHour()"
+	switch cond.Op {
+	case "eq":
+		return scriptQ(fmt.Sprintf("%s == %v", h, cond.Value))
+	case "neq":
+		return scriptQ(fmt.Sprintf("%s != %v", h, cond.Value))
+	case "gt":
+		return scriptQ(fmt.Sprintf("%s > %v", h, cond.Value))
+	case "gte":
+		return scriptQ(fmt.Sprintf("%s >= %v", h, cond.Value))
+	case "lt":
+		return scriptQ(fmt.Sprintf("%s < %v", h, cond.Value))
+	case "lte":
+		return scriptQ(fmt.Sprintf("%s <= %v", h, cond.Value))
+	case "in":
+		vals, _ := json.Marshal(cond.Value)
+		return scriptQ(fmt.Sprintf("%s.contains(%s)", string(vals), h))
 	}
-	// value가 JSON 문자열이면
-	if s, ok := cond.Value.(string); ok {
-		var m map[string]interface{}
-		if json.Unmarshal([]byte(s), &m) == nil {
-			return int(toFloat64(m["start"])), int(toFloat64(m["end"]))
-		}
-	}
-	return 0, 0
+	return nil
+}
+
+func scriptQ(script string) interface{} {
+	return map[string]interface{}{"script": map[string]interface{}{"script": script}}
 }
 
 // resolveESField: UEBA 필드명 → OpenSearch 필드 경로
 func resolveESField(field string) string {
-	// 최상위 필드
-	top := map[string]bool{"msgId": true, "hostname": true, "eventType": true, "@timestamp": true, "severity": true}
-	if top[field] {
-		return field + ".keyword"
-	}
 	if field == "@timestamp" {
 		return field
 	}
-	// 나머지는 cefExtensions 내부
+	top := map[string]bool{"msgId": true, "hostname": true, "eventType": true, "severity": true}
+	if top[field] {
+		return field + ".keyword"
+	}
 	return "cefExtensions." + field + ".keyword"
 }
 
@@ -931,13 +933,20 @@ func evaluateCondition(event map[string]interface{}, cond RuleCondition) bool {
 		return containsString(fieldValue, cond.Value)
 	case "in":
 		return inArray(fieldValue, cond.Value)
-	case "time_range":
-		return checkTimeRange(event, cond)
 	}
 	return false
 }
 
 func getFieldValue(event map[string]interface{}, field string) interface{} {
+	// hour 가상 필드: @timestamp에서 추출
+	if field == "hour" {
+		if ts, ok := event["@timestamp"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				return float64(t.In(loc).Hour())
+			}
+		}
+		return nil
+	}
 	// 1. attrs (Label 기반 파싱 결과) 에서 먼저 찾기
 	if attrs, ok := event["_attrs"].(map[string]interface{}); ok {
 		if val, ok := attrs[field]; ok {
@@ -1039,24 +1048,6 @@ func inArray(val interface{}, arr interface{}) bool {
 		}
 	}
 	return false
-}
-
-func checkTimeRange(event map[string]interface{}, cond RuleCondition) bool {
-	ts, ok := event["@timestamp"].(string)
-	if !ok {
-		return false
-	}
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return false
-	}
-	hour := t.In(loc).Hour()
-	start, end := extractTimeRange(cond)
-
-	if start <= end {
-		return hour >= start && hour <= end
-	}
-	return hour >= start || hour <= end
 }
 
 // ===== 자정 롤오버 =====
@@ -1178,24 +1169,6 @@ func loadRules() []Rule {
 			rule.Name = hit.ID
 		}
 		rule.ID = hit.ID
-
-		// time_range conditions: struct에 없는 start/end를 raw JSON에서 보충
-		var rawDoc map[string]interface{}
-		json.Unmarshal(hit.Raw, &rawDoc)
-		if m, ok := rawDoc["match"].(map[string]interface{}); ok {
-			if conds, ok := m["conditions"].([]interface{}); ok {
-				for i, raw := range conds {
-					if i >= len(rule.Match.Conditions) {
-						break
-					}
-					if rule.Match.Conditions[i].Op == "time_range" {
-						if c, ok := raw.(map[string]interface{}); ok {
-							rule.Match.Conditions[i].Value = c
-						}
-					}
-				}
-			}
-		}
 
 		rulesCache = append(rulesCache, rule)
 	}
@@ -1659,7 +1632,7 @@ func validateRule(data map[string]interface{}) []string {
 	if _, ok := match["msgId"].(string); !ok || match["msgId"] == "" {
 		errs = append(errs, "match.msgId 필수")
 	}
-	validOps := map[string]bool{"eq": true, "neq": true, "gt": true, "gte": true, "lt": true, "lte": true, "contains": true, "in": true, "time_range": true}
+	validOps := map[string]bool{"eq": true, "neq": true, "gt": true, "gte": true, "lt": true, "lte": true, "contains": true, "in": true}
 	if conds, ok := match["conditions"].([]interface{}); ok {
 		for i, raw := range conds {
 			c, _ := raw.(map[string]interface{})
