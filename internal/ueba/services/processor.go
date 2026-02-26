@@ -19,9 +19,7 @@ import (
 )
 
 const (
-	maxRulesSize    = 100
-	maxUsersAggSize = 500
-	recoverBatch    = 1000
+	maxRulesSize = 100
 )
 
 var (
@@ -89,8 +87,6 @@ type RuleCondition struct {
 	Field string      `json:"field"`
 	Op    string      `json:"op"`
 	Value interface{} `json:"value"`
-	Start interface{} `json:"start,omitempty"`
-	End   interface{} `json:"end,omitempty"`
 }
 
 // RuleAggregate: 룰이 매칭된 이벤트에서 무엇을 집계할지 정의
@@ -106,9 +102,10 @@ type RuleUEBA struct {
 }
 
 type Config struct {
-	Anomaly AnomalyConfig `json:"anomaly"`
-	Decay   DecayConfig   `json:"decay"`
-	Tiers   TierConfig    `json:"tiers"`
+	Anomaly      AnomalyConfig `json:"anomaly"`
+	Decay        DecayConfig   `json:"decay"`
+	Tiers        TierConfig    `json:"tiers"`
+	MaxUsersAgg  int           `json:"max_users_agg"`
 }
 
 type AnomalyConfig struct {
@@ -226,7 +223,7 @@ func initUsersFromPrevScores() {
 		},
 		"aggs": map[string]interface{}{
 			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": maxUsersAggSize},
+				"terms": map[string]interface{}{"field": "userId.keyword", "size": loadConfig().MaxUsersAgg},
 				"aggs": map[string]interface{}{
 					"latest": map[string]interface{}{
 						"top_hits": map[string]interface{}{
@@ -343,7 +340,7 @@ func recoverRuleAgg(rule Rule, today string) {
 
 	// aggregate 타입에 따른 agg 구성
 	userAgg := map[string]interface{}{
-		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": maxUsersAggSize},
+		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": loadConfig().MaxUsersAgg},
 	}
 	switch rule.Aggregate.Type {
 	case "sum":
@@ -420,7 +417,7 @@ func recoverEventCounts(today string) {
 		},
 		"aggs": map[string]interface{}{
 			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": maxUsersAggSize},
+				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": loadConfig().MaxUsersAgg},
 				"aggs": map[string]interface{}{
 					"msgs": map[string]interface{}{
 						"terms": map[string]interface{}{"field": "msgId.keyword", "size": 100},
@@ -568,15 +565,11 @@ func conditionToESClause(cond RuleCondition) interface{} {
 
 // extractTimeRange: time_range 조건에서 start/end 추출
 func extractTimeRange(cond RuleCondition) (int, int) {
-	// 1) struct 필드에서
-	if cond.Start != nil && cond.End != nil {
-		return int(toFloat64(cond.Start)), int(toFloat64(cond.End))
-	}
-	// 2) value가 map이면
+	// value가 map이면 (loadRules에서 raw JSON 보충)
 	if m, ok := cond.Value.(map[string]interface{}); ok {
 		return int(toFloat64(m["start"])), int(toFloat64(m["end"]))
 	}
-	// 3) value가 JSON 문자열이면
+	// value가 JSON 문자열이면
 	if s, ok := cond.Value.(string); ok {
 		var m map[string]interface{}
 		if json.Unmarshal([]byte(s), &m) == nil {
@@ -1130,9 +1123,10 @@ func loadConfig() *Config {
 	defer configMu.Unlock()
 
 	configCache = &Config{
-		Anomaly: AnomalyConfig{ZThreshold: 2.0, Beta: 10, SigmaFloor: 0.5, ColdStartMinDays: 7, BaselineWindow: 7, FrequencyFunction: "log"},
-		Decay:   DecayConfig{Lambda: 0.9},
-		Tiers:   TierConfig{GreenMax: 40, YellowMax: 99},
+		Anomaly:     AnomalyConfig{ZThreshold: 2.0, Beta: 10, SigmaFloor: 0.5, ColdStartMinDays: 7, BaselineWindow: 7, FrequencyFunction: "log"},
+		Decay:       DecayConfig{Lambda: 0.9},
+		Tiers:       TierConfig{GreenMax: 40, YellowMax: 99},
+		MaxUsersAgg: 10000,
 	}
 
 	resp, err := httpClient.Get(fmt.Sprintf("%s/%s/_doc/settings", opensearchURL, common.SettingsIndex(indexPrefix)))
@@ -1142,6 +1136,9 @@ func loadConfig() *Config {
 		}
 		json.NewDecoder(resp.Body).Decode(&result)
 		resp.Body.Close()
+		if result.Source.MaxUsersAgg <= 0 {
+			result.Source.MaxUsersAgg = 10000
+		}
 		configCache = &result.Source
 	}
 	return configCache
@@ -1173,23 +1170,45 @@ func loadRules() []Rule {
 	}
 	defer resp.Body.Close()
 
-	var result struct {
+	// raw JSON으로 디코딩 (struct 필드 누락 방지)
+	var rawResult struct {
 		Hits struct {
 			Hits []struct {
-				ID     string `json:"_id"`
-				Source Rule   `json:"_source"`
+				ID  string          `json:"_id"`
+				Raw json.RawMessage `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	json.Unmarshal(bodyBytes, &rawResult)
 
-	rulesCache = make([]Rule, 0, len(result.Hits.Hits))
-	for _, hit := range result.Hits.Hits {
-		rule := hit.Source
+	rulesCache = make([]Rule, 0, len(rawResult.Hits.Hits))
+	for _, hit := range rawResult.Hits.Hits {
+		var rule Rule
+		json.Unmarshal(hit.Raw, &rule)
 		if rule.Name == "" {
 			rule.Name = hit.ID
 		}
 		rule.ID = hit.ID
+
+		// time_range conditions: struct에 없는 start/end를 raw JSON에서 보충
+		var rawDoc map[string]interface{}
+		json.Unmarshal(hit.Raw, &rawDoc)
+		if m, ok := rawDoc["match"].(map[string]interface{}); ok {
+			if conds, ok := m["conditions"].([]interface{}); ok {
+				for i, raw := range conds {
+					if i >= len(rule.Match.Conditions) {
+						break
+					}
+					if rule.Match.Conditions[i].Op == "time_range" {
+						if c, ok := raw.(map[string]interface{}); ok {
+							rule.Match.Conditions[i].Value = c
+						}
+					}
+				}
+			}
+		}
+
 		rulesCache = append(rulesCache, rule)
 	}
 	log.Printf("[CONFIG] %d개 UEBA 규칙 로드", len(rulesCache))
@@ -1834,7 +1853,7 @@ func GetUserScores(draw, start, length int, search, sortField, orderDir string) 
 		"size": 0,
 		"aggs": map[string]interface{}{
 			"byUser": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": maxUsersAggSize},
+				"terms": map[string]interface{}{"field": "userId.keyword", "size": loadConfig().MaxUsersAgg},
 				"aggs": map[string]interface{}{
 					"recent": map[string]interface{}{
 						"top_hits": map[string]interface{}{"size": 1, "sort": []map[string]interface{}{{"@timestamp": "desc"}}},
