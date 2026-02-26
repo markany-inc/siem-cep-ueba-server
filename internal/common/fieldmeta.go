@@ -37,6 +37,7 @@ func (c *FieldMetaController) Put(ctx echo.Context) error {
 	if err := ctx.Bind(&meta); err != nil {
 		return ctx.JSON(400, map[string]string{"error": "invalid JSON"})
 	}
+	delete(meta, "_id") // OpenSearch 메타필드 제거
 	meta["migratedAt"] = time.Now().Format(time.RFC3339)
 	if err := c.OS.Put(FieldMetaIndex(c.IndexPrefix), "meta-latest", meta); err != nil {
 		return ctx.JSON(500, map[string]string{"error": err.Error()})
