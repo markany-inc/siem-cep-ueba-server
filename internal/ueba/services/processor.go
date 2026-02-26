@@ -22,6 +22,18 @@ const (
 	maxRulesSize = 100
 )
 
+// aggSize: OpenSearch terms aggregation size — 현재 유저 수의 2배 (최소 1000)
+func aggSize() int {
+	userStatesMu.RLock()
+	n := len(userStates)
+	userStatesMu.RUnlock()
+	size := n * 2
+	if size < 1000 {
+		size = 1000
+	}
+	return size
+}
+
 var (
 	opensearchURL  string
 	kafkaBootstrap string
@@ -102,10 +114,9 @@ type RuleUEBA struct {
 }
 
 type Config struct {
-	Anomaly      AnomalyConfig `json:"anomaly"`
-	Decay        DecayConfig   `json:"decay"`
-	Tiers        TierConfig    `json:"tiers"`
-	MaxUsersAgg  int           `json:"max_users_agg"`
+	Anomaly AnomalyConfig `json:"anomaly"`
+	Decay   DecayConfig   `json:"decay"`
+	Tiers   TierConfig    `json:"tiers"`
 }
 
 type AnomalyConfig struct {
@@ -223,7 +234,7 @@ func initUsersFromPrevScores() {
 		},
 		"aggs": map[string]interface{}{
 			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": loadConfig().MaxUsersAgg},
+				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSize()},
 				"aggs": map[string]interface{}{
 					"latest": map[string]interface{}{
 						"top_hits": map[string]interface{}{
@@ -340,7 +351,7 @@ func recoverRuleAgg(rule Rule, today string) {
 
 	// aggregate 타입에 따른 agg 구성
 	userAgg := map[string]interface{}{
-		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": loadConfig().MaxUsersAgg},
+		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSize()},
 	}
 	switch rule.Aggregate.Type {
 	case "sum":
@@ -417,7 +428,7 @@ func recoverEventCounts(today string) {
 		},
 		"aggs": map[string]interface{}{
 			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": loadConfig().MaxUsersAgg},
+				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSize()},
 				"aggs": map[string]interface{}{
 					"msgs": map[string]interface{}{
 						"terms": map[string]interface{}{"field": "msgId.keyword", "size": 100},
@@ -1123,10 +1134,9 @@ func loadConfig() *Config {
 	defer configMu.Unlock()
 
 	configCache = &Config{
-		Anomaly:     AnomalyConfig{ZThreshold: 2.0, Beta: 10, SigmaFloor: 0.5, ColdStartMinDays: 7, BaselineWindow: 7, FrequencyFunction: "log"},
-		Decay:       DecayConfig{Lambda: 0.9},
-		Tiers:       TierConfig{GreenMax: 40, YellowMax: 99},
-		MaxUsersAgg: 10000,
+		Anomaly: AnomalyConfig{ZThreshold: 2.0, Beta: 10, SigmaFloor: 0.5, ColdStartMinDays: 7, BaselineWindow: 7, FrequencyFunction: "log"},
+		Decay:   DecayConfig{Lambda: 0.9},
+		Tiers:   TierConfig{GreenMax: 40, YellowMax: 99},
 	}
 
 	resp, err := httpClient.Get(fmt.Sprintf("%s/%s/_doc/settings", opensearchURL, common.SettingsIndex(indexPrefix)))
@@ -1136,9 +1146,6 @@ func loadConfig() *Config {
 		}
 		json.NewDecoder(resp.Body).Decode(&result)
 		resp.Body.Close()
-		if result.Source.MaxUsersAgg <= 0 {
-			result.Source.MaxUsersAgg = 10000
-		}
 		configCache = &result.Source
 	}
 	return configCache
@@ -1853,7 +1860,7 @@ func GetUserScores(draw, start, length int, search, sortField, orderDir string) 
 		"size": 0,
 		"aggs": map[string]interface{}{
 			"byUser": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": loadConfig().MaxUsersAgg},
+				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSize()},
 				"aggs": map[string]interface{}{
 					"recent": map[string]interface{}{
 						"top_hits": map[string]interface{}{"size": 1, "sort": []map[string]interface{}{{"@timestamp": "desc"}}},
