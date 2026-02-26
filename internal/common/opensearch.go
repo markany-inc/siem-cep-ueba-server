@@ -129,3 +129,14 @@ func (c *OSClient) SearchRaw(index string, body interface{}) (map[string]interfa
 	json.NewDecoder(resp.Body).Decode(&result)
 	return result, nil
 }
+
+func (c *OSClient) GetMapping(index string) (map[string]interface{}, error) {
+	resp, err := Client.Get(c.BaseURL + "/" + index + "/_mapping")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	return result, nil
+}

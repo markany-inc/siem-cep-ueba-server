@@ -140,43 +140,43 @@ func (c *FieldMetaController) AnalyzeField(ctx echo.Context) error {
 	return ctx.JSON(200, c.analyzeFieldDetail(req.Event, req.Field))
 }
 
-// analyzeEvent - 로그 인덱스에서 해당 이벤트의 CEF extension 필드만 추출
-// csN/cnN 등 raw 키 대신 label 이름으로 변환하여 반환
+// analyzeEvent - Mapping API + 샘플 1건으로 필드 추출 (대규모 안정성)
 func (c *FieldMetaController) analyzeEvent(msgID string) []string {
+	// 1. Mapping API로 cefExtensions 하위 필드 목록 조회
+	mappingFields := c.getFieldsFromMapping()
+
+	// 2. 샘플 1건으로 Label→이름 매핑 확인
 	docs, _ := c.OS.Search(LogsIndexPattern(c.IndexPrefix), map[string]interface{}{
-		"size":  50,
+		"size":  1,
 		"query": map[string]interface{}{"term": map[string]interface{}{"msgId.keyword": msgID}},
-		"sort":  []map[string]string{{"@timestamp": "desc"}},
 	})
 
 	fieldSet := make(map[string]bool)
-	for _, doc := range docs {
-		cef, _ := doc["cefExtensions"].(map[string]interface{})
-		if cef == nil {
+	labelKeys := make(map[string]bool)
+
+	// 샘플에서 Label 매핑 추출
+	if len(docs) > 0 {
+		if cef, ok := docs[0]["cefExtensions"].(map[string]interface{}); ok {
+			for k, v := range cef {
+				if strings.HasSuffix(k, "Label") {
+					if label, ok := v.(string); ok && label != "" {
+						fieldSet[strings.ReplaceAll(label, " ", "")] = true
+						labelKeys[strings.TrimSuffix(k, "Label")] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Mapping 필드 중 Label이 아니고 raw 키도 아닌 것 추가
+	for _, f := range mappingFields {
+		if strings.HasSuffix(f, "Label") {
 			continue
 		}
-		// label→value 쌍 수집: *Label 키에서 label 이름 추출
-		labelKeys := map[string]bool{} // cs1, cn2 등 raw value 키
-		for k, v := range cef {
-			if strings.HasSuffix(k, "Label") {
-				label, _ := v.(string)
-				if label != "" {
-					fieldSet[strings.ReplaceAll(label, " ", "")] = true
-					labelKeys[strings.TrimSuffix(k, "Label")] = true
-				}
-				// Label 키 자체는 제외
-			}
+		if labelKeys[f] {
+			continue
 		}
-		// raw 키 중 label이 있는 것은 제외, 나머지만 추가
-		for k := range cef {
-			if strings.HasSuffix(k, "Label") {
-				continue
-			}
-			if labelKeys[k] {
-				continue // cs1 등 → label 이름으로 대체됨
-			}
-			fieldSet[k] = true
-		}
+		fieldSet[f] = true
 	}
 
 	fields := make([]string, 0, len(fieldSet))
@@ -184,6 +184,29 @@ func (c *FieldMetaController) analyzeEvent(msgID string) []string {
 		fields = append(fields, f)
 	}
 	sort.Strings(fields)
+	return fields
+}
+
+// getFieldsFromMapping - Mapping API로 cefExtensions 하위 필드 목록 조회
+func (c *FieldMetaController) getFieldsFromMapping() []string {
+	raw, err := c.OS.GetMapping(LogsIndexPattern(c.IndexPrefix))
+	if err != nil {
+		return nil
+	}
+
+	fields := []string{}
+	// 인덱스별 매핑 순회
+	for _, indexMapping := range raw {
+		im, _ := indexMapping.(map[string]interface{})
+		mappings, _ := im["mappings"].(map[string]interface{})
+		props, _ := mappings["properties"].(map[string]interface{})
+		cefExt, _ := props["cefExtensions"].(map[string]interface{})
+		cefProps, _ := cefExt["properties"].(map[string]interface{})
+		for field := range cefProps {
+			fields = append(fields, field)
+		}
+		break // 첫 인덱스만 (스키마 동일)
+	}
 	return fields
 }
 
