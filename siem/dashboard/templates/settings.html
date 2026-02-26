@@ -316,7 +316,7 @@
                 const r = await fetch('/api/safepc-ueba-rules');
                 const data = await r.json();
                 const all = Array.isArray(data) ? data : (data.rules || []);
-                uebaRules = all.filter(r => r.ueba?.enabled);
+                uebaRules = all.filter(r => r.ueba);
                 renderUebaRules();
             } catch(e) { console.log('UEBA rules load error', e); }
         }
@@ -329,7 +329,10 @@
                 const msgId = r.match?.msgId || r.patterns?.[0]?.match?.msgId || '-';
                 const w = r.weight || 0;
                 const agg = r.aggregate?.type || 'count';
-                return `<div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg mb-2 cursor-pointer hover:bg-blue-50" onclick="openUebaRuleModal('${r.id}')">
+                const on = r.enabled !== false;
+                const onBadge = on ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:11px">ON</span>' : '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-size:11px">OFF</span>';
+                return `<div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg mb-2 cursor-pointer hover:bg-blue-50" onclick="openUebaRuleModal('${r.id}')" style="${on?'':'opacity:0.5'}">
+                    <div style="min-width:36px">${onBadge}</div>
                     <div class="flex-1">
                         <div class="font-medium text-gray-900">${r.name}</div>
                         <div class="text-xs text-gray-500">${msgId} · ${agg}</div>
