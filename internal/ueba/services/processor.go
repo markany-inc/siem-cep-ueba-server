@@ -1572,6 +1572,9 @@ func CreateRule(data map[string]interface{}) (string, error) {
 	if errs := validateRule(data); len(errs) > 0 {
 		return "", fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
+	if err := validateDSL(data); err != nil {
+		return "", fmt.Errorf("DSL 검증 실패: %v", err)
+	}
 	delete(data, "_id")
 	delete(data, "id")
 	data["createdAt"] = time.Now().In(loc).Format(time.RFC3339)
@@ -1585,6 +1588,12 @@ func CreateRule(data map[string]interface{}) (string, error) {
 }
 
 func UpdateRule(id string, data map[string]interface{}) error {
+	if errs := validateRule(data); len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	if err := validateDSL(data); err != nil {
+		return fmt.Errorf("DSL 검증 실패: %v", err)
+	}
 	delete(data, "_id")
 	delete(data, "id")
 	_, err := esRequest("PUT", fmt.Sprintf("/%s/_doc/%s", common.RulesIndex(indexPrefix), id), data)
@@ -1641,6 +1650,44 @@ func reloadAndReprocess() {
 	}()
 }
 
+// validateDSL: 룰 JSON → OpenSearch Query DSL 변환 후 _validate/query로 검증
+func validateDSL(data map[string]interface{}) error {
+	rule := parseRuleFromMap(data)
+	if rule == nil {
+		return nil // 파싱 불가 시 구조 검증에서 이미 걸림
+	}
+	query := buildRuleESQuery(*rule, time.Now().In(loc).Format("2006-01-02"))
+	body, _ := json.Marshal(query)
+	resp, err := httpClient.Post(
+		fmt.Sprintf("%s/%s/_validate/query", opensearchURL, common.LogsIndexPattern(indexPrefix)),
+		"application/json", bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("OpenSearch 연결 실패: %v", err)
+	}
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if valid, _ := result["valid"].(bool); !valid {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = "쿼리가 유효하지 않음"
+		}
+		return fmt.Errorf("%s", errMsg)
+	}
+	return nil
+}
+
+// parseRuleFromMap: map → Rule 구조체 (DSL 검증용)
+func parseRuleFromMap(data map[string]interface{}) *Rule {
+	b, _ := json.Marshal(data)
+	var rule Rule
+	if json.Unmarshal(b, &rule) != nil {
+		return nil
+	}
+	return &rule
+}
+
 func validateRule(data map[string]interface{}) []string {
 	var errs []string
 	if _, ok := data["name"].(string); !ok || data["name"] == "" {
@@ -1669,8 +1716,16 @@ func validateRule(data map[string]interface{}) []string {
 			if !validOps[op] {
 				errs = append(errs, fmt.Sprintf("conditions[%d]: 잘못된 op '%s'", i, op))
 			}
-			if _, exists := c["value"]; !exists {
+			if _, exists := c["value"]; !exists && op != "time_range" {
 				errs = append(errs, fmt.Sprintf("conditions[%d]: value 필수", i))
+			}
+			if op == "time_range" {
+				if _, ok := c["start"]; !ok {
+					errs = append(errs, fmt.Sprintf("conditions[%d]: time_range에 start 필수", i))
+				}
+				if _, ok := c["end"]; !ok {
+					errs = append(errs, fmt.Sprintf("conditions[%d]: time_range에 end 필수", i))
+				}
 			}
 			if op == "gt" || op == "gte" || op == "lt" || op == "lte" {
 				if _, ok := tryFloat64(c["value"]); !ok {
@@ -1695,6 +1750,10 @@ func validateRule(data map[string]interface{}) []string {
 
 func ValidateRule(data map[string]interface{}) []string {
 	return validateRule(data)
+}
+
+func ValidateDSL(data map[string]interface{}) error {
+	return validateDSL(data)
 }
 
 func ReloadCache() {

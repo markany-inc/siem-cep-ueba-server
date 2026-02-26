@@ -61,6 +61,9 @@ func (c *RuleController) Validate(ctx echo.Context) error {
 	if errs := services.ValidateRule(data); len(errs) > 0 {
 		return ctx.JSON(400, map[string]interface{}{"valid": false, "errors": errs})
 	}
+	if err := services.ValidateDSL(data); err != nil {
+		return ctx.JSON(400, map[string]interface{}{"valid": false, "errors": []string{err.Error()}})
+	}
 	return ctx.JSON(200, map[string]interface{}{"valid": true})
 }
 
