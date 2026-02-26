@@ -20,19 +20,8 @@ import (
 
 const (
 	maxRulesSize = 100
+	aggSizeMax   = 65535 // OpenSearch terms agg 최대 bucket 수
 )
-
-// aggSize: OpenSearch terms aggregation size — 현재 유저 수의 2배 (최소 1000)
-func aggSize() int {
-	userStatesMu.RLock()
-	n := len(userStates)
-	userStatesMu.RUnlock()
-	size := n * 2
-	if size < 1000 {
-		size = 1000
-	}
-	return size
-}
 
 var (
 	opensearchURL  string
@@ -234,7 +223,7 @@ func initUsersFromPrevScores() {
 		},
 		"aggs": map[string]interface{}{
 			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSize()},
+				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSizeMax},
 				"aggs": map[string]interface{}{
 					"latest": map[string]interface{}{
 						"top_hits": map[string]interface{}{
@@ -351,7 +340,7 @@ func recoverRuleAgg(rule Rule, today string) {
 
 	// aggregate 타입에 따른 agg 구성
 	userAgg := map[string]interface{}{
-		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSize()},
+		"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSizeMax},
 	}
 	switch rule.Aggregate.Type {
 	case "sum":
@@ -428,7 +417,7 @@ func recoverEventCounts(today string) {
 		},
 		"aggs": map[string]interface{}{
 			"users": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSize()},
+				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": aggSizeMax},
 				"aggs": map[string]interface{}{
 					"msgs": map[string]interface{}{
 						"terms": map[string]interface{}{"field": "msgId.keyword", "size": 100},
@@ -1860,7 +1849,7 @@ func GetUserScores(draw, start, length int, search, sortField, orderDir string) 
 		"size": 0,
 		"aggs": map[string]interface{}{
 			"byUser": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSize()},
+				"terms": map[string]interface{}{"field": "userId.keyword", "size": aggSizeMax},
 				"aggs": map[string]interface{}{
 					"recent": map[string]interface{}{
 						"top_hits": map[string]interface{}{"size": 1, "sort": []map[string]interface{}{{"@timestamp": "desc"}}},
