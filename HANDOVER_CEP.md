@@ -1,6 +1,6 @@
 # CEP (Complex Event Processing) 인수인계서
 
-> 작성일: 2026-02-26 | 최종 갱신: 2026-02-26
+> 작성일: 2026-02-26 | 최종 갱신: 2026-02-26 11:15
 
 ## 개요
 
@@ -100,3 +100,47 @@ cd /Safepc/siem && docker-compose up -d --build cep
 - `HOUR(PROCTIME())`은 KST 시간 반환
 - 규칙 reload 시 기존 Job 취소 → 새 Job 순차 제출 (동시 제출 시 Flink 부하)
 - `cefField("필드명")`은 `cefExtensions['필드명']`으로 변환 (Label 변환은 LogSink가 처리)
+
+---
+
+## CEP/UEBA 룰 스키마 통일 (2026-02-26)
+
+CEP와 UEBA가 동일한 룰 JSON 구조를 사용:
+
+```json
+{
+  "name": "비업무시간 접속",
+  "enabled": true,
+  "match": {
+    "msgId": "MESSAGE_AGENT_AUTHENTICATION",
+    "logic": "and",
+    "conditions": [
+      {"field": "outcome", "op": "eq", "value": "success"},
+      {"field": "hour", "op": "time_range", "start": 22, "end": 6}
+    ]
+  },
+  "cep": {"enabled": true, "severity": "MEDIUM"},
+  "ueba": {"enabled": true, "weight": 5}
+}
+```
+
+- CEP: `sql_builder.go` → Flink SQL 변환
+- UEBA: `buildRuleESQuery()` → OpenSearch Query DSL 변환
+
+### 지원 연산자
+
+| op | CEP (Flink SQL) | UEBA (OpenSearch) |
+|----|-----------------|-------------------|
+| eq | `= 'value'` | `{"term": {...}}` |
+| neq | `!= 'value'` | `{"bool": {"must_not": [...]}}` |
+| gt/gte/lt/lte | `CAST(...) > N` | `{"range": {...}}` |
+| in | `IN ('a','b')` | `{"terms": [...]}` |
+| like | `LIKE '%...'` | - |
+| regex | `REGEXP(...)` | - |
+| contains | - | `{"wildcard": {...}}` |
+| time_range | `HOUR(proctime) >= X OR < Y` | script query (KST) |
+
+### hour 가상 필드
+
+- CEP: `HOUR(proctime)` 변환
+- UEBA: `@timestamp`에서 KST hour 추출

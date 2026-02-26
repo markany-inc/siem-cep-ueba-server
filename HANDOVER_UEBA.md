@@ -1,6 +1,6 @@
 # UEBA (User Entity Behavior Analytics) 인수인계서
 
-> 작성일: 2026-02-26 | 최종 갱신: 2026-02-26
+> 작성일: 2026-02-26 | 최종 갱신: 2026-02-26 11:15
 
 ## 개요
 
@@ -238,8 +238,32 @@ cd /Safepc/siem && docker-compose up -d --build ueba
 
 ## 주의사항
 
-- `processor.go` 1파일에 전체 로직 (~1780줄) — 향후 분리 고려
-- scores 저장은 10분 배치 + 시작 시 즉시 저장
+- `processor.go` 1파일에 전체 로직 (~1800줄) — 향후 분리 고려
+- scores 저장은 초기화 시 + 룰 변경 시 + 수동 API 호출 시
 - `_id = userId_HH` → 같은 시간대에 여러 번 저장하면 덮어씀 (의도된 동작)
 - 자정 롤오버 시 `saveScoresBatchForDate(어제날짜)` → 어제 인덱스에 저장
 - `loadConfig()`/`loadRules()`는 캐시 사용 — 변경 시 `/api/reload` 호출 필요
+
+---
+
+## 2026-02-26 주요 변경사항
+
+### Composite Aggregation 전환
+- 기존: `terms` aggregation (유저 수 65,535 제한)
+- 변경: `composite` aggregation (페이징 기반, 무제한)
+- 적용 위치: `initUsersFromPrevScores`, `recoverRuleAgg`, `recoverEventCounts`, `GetUserScores`
+
+### 룰 DSL 검증 추가
+- `validateDSL()`: 룰 JSON → OpenSearch Query DSL 변환 → `_validate/query` dry-run
+- Create/Update 시 자동 검증, 잘못된 룰 사전 차단
+- `POST /api/rules/validate`: 저장 없이 검증만
+
+### time_range 연산자 통일
+- CEP/UEBA 동일 스키마: `{"field": "hour", "op": "time_range", "start": 22, "end": 6}`
+- UEBA: `hourToESClause()` → KST timezone 적용 script query
+- 실시간 매칭: `getFieldValue("hour")` → @timestamp에서 KST hour 추출
+
+### 룰 JSON → Query DSL 변환
+- 공식 라이브러리 없음, 직접 구현
+- `buildRuleESQuery()`: 룰 struct → OpenSearch bool query
+- `conditionToESClause()`: 조건별 ES clause 생성 (eq→term, gte→range, time_range→script)
