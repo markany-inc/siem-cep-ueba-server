@@ -1404,8 +1404,11 @@
         function openMigration() {
             document.getElementById('migrationModal').classList.add('show');
             // 기존 메타데이터 로드
-            fetch('/api/cep/field-meta').then(r=>r.json()).then(data => {
-                migMeta = data || {events:{}};
+            fetch('/api/cep/field-meta').then(r => {
+                if (!r.ok) return {events: {}};
+                return r.json();
+            }).then(data => {
+                migMeta = (data && data.events) ? data : {events: {}};
                 if (migMeta.migratedAt) {
                     document.getElementById('migLastDate').textContent = '최근: ' + new Date(migMeta.migratedAt).toLocaleString('ko-KR');
                 }
