@@ -529,6 +529,23 @@ async def update_siem_rule(rule_id: str, request: Request):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.delete("/api/safepc-ueba-rules/{rule_id}")
+@app.delete("/api/cep/rules/{rule_id}")
+async def delete_siem_rule(rule_id: str):
+    """규칙 삭제 — UEBA/CEP 양쪽에 위임"""
+    result = {}
+    try:
+        async with httpx.AsyncClient() as client:
+            for name, url in [("ueba", UEBA_URL), ("cep", CEP_URL)]:
+                try:
+                    r = await client.delete(f"{url}/api/rules/{rule_id}", timeout=10)
+                    result[name] = r.json()
+                except:
+                    pass
+            return {"status": "ok", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.post("/api/safepc-ueba-rules")
 @app.post("/api/cep/rules")
 async def create_siem_rule(request: Request):

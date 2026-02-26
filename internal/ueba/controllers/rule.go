@@ -16,7 +16,7 @@ func NewRuleController() *RuleController {
 }
 
 func (c *RuleController) List(ctx echo.Context) error {
-	return ctx.JSON(200, map[string]interface{}{"rules": services.GetRules()})
+	return ctx.JSON(200, map[string]interface{}{"rules": services.GetRulesRaw()})
 }
 
 func (c *RuleController) Create(ctx echo.Context) error {

@@ -280,8 +280,8 @@
         });
 
         // 규칙 로드
-        fetch('/api/cep/rules').then(r => r.json()).then(data => {
-            const rules = data.rules || data;
+        fetch('/api/safepc-ueba-rules').then(r => r.json()).then(data => {
+            const rules = Array.isArray(data) ? data : (data.rules || []);
             rulesData = {};
             rules.forEach(r => { r.id = r.id || r.ruleId; rulesData[r.id] = r; });
             
@@ -358,7 +358,6 @@
             document.getElementById('modalTitle').textContent = isCep ? 'CEP 규칙 수정' : 'UEBA 규칙 수정';
             document.getElementById('editRuleId').value = ruleId;
             document.getElementById('editRuleType').value = isCep ? 'cep' : 'ueba';
-            document.getElementById('editName').value = rule.name;
             document.getElementById('editEnabled').checked = rule.enabled;
             
             // JSON 표시 (개별 필드 없음)
@@ -394,6 +393,7 @@
             // JSON 편집 영역에 원본 데이터 표시 (sql 제외)
             const jsonData = JSON.parse(JSON.stringify(rule));
             delete jsonData.sql;  // SQL은 Go CEP 서비스가 자동 생성
+            delete jsonData._id;
             document.getElementById('editJson').value = JSON.stringify(jsonData, null, 2);
             
             document.getElementById('editModal').classList.add('show');

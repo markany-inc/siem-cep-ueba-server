@@ -1365,6 +1365,41 @@ func GetRules() []Rule {
 	return loadRules()
 }
 
+// GetRulesRaw: 프론트엔드용 — OpenSearch 원본 JSON 반환 (struct 직렬화 누락 방지)
+func GetRulesRaw() []map[string]interface{} {
+	query := map[string]interface{}{"size": maxRulesSize, "query": map[string]interface{}{
+		"bool": map[string]interface{}{
+			"must": []map[string]interface{}{
+				{"term": map[string]interface{}{"enabled": true}},
+				{"term": map[string]interface{}{"ueba.enabled": true}},
+			},
+		},
+	}}
+	body, _ := json.Marshal(query)
+	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.RulesIndex(indexPrefix)), "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Hits struct {
+			Hits []struct {
+				ID     string                 `json:"_id"`
+				Source map[string]interface{} `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	rules := make([]map[string]interface{}, 0, len(result.Hits.Hits))
+	for _, hit := range result.Hits.Hits {
+		r := hit.Source
+		r["id"] = hit.ID
+		delete(r, "_id")
+		rules = append(rules, r)
+	}
+	return rules
+}
+
 func CreateRule(data map[string]interface{}) (string, error) {
 	if errs := validateRule(data); len(errs) > 0 {
 		return "", fmt.Errorf("%s", strings.Join(errs, "; "))
@@ -1376,7 +1411,7 @@ func CreateRule(data map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ReloadCache()
+	reloadAndReprocess()
 	id, _ := result["_id"].(string)
 	return id, nil
 }
@@ -1388,7 +1423,7 @@ func UpdateRule(id string, data map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	ReloadCache()
+	reloadAndReprocess()
 	return nil
 }
 
@@ -1397,8 +1432,22 @@ func DeleteRule(id string) error {
 	if err != nil {
 		return err
 	}
-	ReloadCache()
+	reloadAndReprocess()
 	return nil
+}
+
+// reloadAndReprocess: 룰 변경 후 캐시 갱신 + 오늘 이벤트 재처리
+func reloadAndReprocess() {
+	ReloadCache()
+	go func() {
+		log.Printf("[RULE] 룰 변경 → 오늘 이벤트 재처리 시작")
+		// 기존 상태 초기화 후 오늘 이벤트 전체 재처리
+		userStatesMu.Lock()
+		userStates = make(map[string]*UserState)
+		userStatesMu.Unlock()
+		recoverTodayState()
+		log.Printf("[RULE] 오늘 이벤트 재처리 완료 (%d명)", len(userStates))
+	}()
 }
 
 func validateRule(data map[string]interface{}) []string {

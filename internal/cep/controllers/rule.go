@@ -29,6 +29,7 @@ func (c *RuleController) List(ctx echo.Context) error {
 	}
 	for i := range docs {
 		docs[i]["id"] = docs[i]["_id"]
+		delete(docs[i], "_id")
 	}
 	return ctx.JSON(200, map[string]interface{}{"rules": docs})
 }
