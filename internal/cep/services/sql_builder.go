@@ -101,7 +101,7 @@ func BuildConditionClause(c map[string]interface{}) string {
 func isBaseField(field string) bool {
 	base := map[string]bool{
 		"msgId": true, "hostname": true, "userId": true,
-		"userName": true, "userIp": true, "eventType": true,
+		"userName": true, "userIp": true,
 	}
 	return base[field]
 }
