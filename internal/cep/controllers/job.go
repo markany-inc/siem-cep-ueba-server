@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"log"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/markany/safepc-siem/internal/cep/services"
@@ -61,13 +62,7 @@ func (c *JobController) ReloadAll() (int, error) {
 		return 0, err
 	}
 
-	// 기존 CEP Job 전부 취소
-	for jid, name := range c.Flink.GetRunningCEPJobs() {
-		log.Printf("[CEP] 기존 Job 취소: %s", name)
-		c.Flink.CancelJobByID(jid)
-	}
-
-	// CEP 규칙 조회
+	// CEP 규칙 조회 (jobId 포함)
 	docs, err := c.OS.Search(common.RulesIndex(c.IndexPrefix), map[string]interface{}{
 		"size": 100,
 		"query": map[string]interface{}{
@@ -81,6 +76,33 @@ func (c *JobController) ReloadAll() (int, error) {
 	})
 	if err != nil {
 		return 0, err
+	}
+
+	// 1. 룰에 저장된 jobId로 취소
+	cancelCount := 0
+	for _, doc := range docs {
+		if jobId, ok := doc["jobId"].(string); ok && jobId != "" {
+			name, _ := doc["name"].(string)
+			short := jobId
+			if len(short) > 8 {
+				short = short[:8]
+			}
+			log.Printf("[CEP] 기존 Job 취소 (룰): %s (%s)", name, short)
+			c.Flink.CancelJobByID(jobId)
+			cancelCount++
+		}
+	}
+
+	// 2. Flink에서 실행 중인 CEP Job도 취소 (orphan 정리)
+	for jid, name := range c.Flink.GetRunningCEPJobs() {
+		log.Printf("[CEP] 기존 Job 취소 (Flink): %s", name)
+		c.Flink.CancelJobByID(jid)
+		cancelCount++
+	}
+
+	// 취소 완료 대기
+	if cancelCount > 0 {
+		time.Sleep(3 * time.Second)
 	}
 
 	type ruleJob struct {
@@ -102,17 +124,33 @@ func (c *JobController) ReloadAll() (int, error) {
 		return 0, nil
 	}
 
-	// 직렬 제출 (SET pipeline.name + INSERT가 세션 공유하므로 병렬 불가)
+	// 직렬 제출 + jobId 저장
 	submitted := 0
 	for _, r := range toSubmit {
-		if _, err := c.Flink.SubmitRule(r.ruleID, r.name, r.severity, r.sql); err != nil {
+		jobId, err := c.Flink.SubmitRule(r.ruleID, r.name, r.severity, r.sql)
+		if err != nil {
 			log.Printf("[CEP] 제출 실패: %s - %v", r.name, err)
+			c.updateRuleJobStatus(r.ruleID, "", "FAILED")
 		} else {
 			submitted++
+			c.updateRuleJobStatus(r.ruleID, jobId, "RUNNING")
 		}
 	}
 
 	return submitted, nil
+}
+
+// updateRuleJobStatus 룰 인덱스에 Job 상태 업데이트
+func (c *JobController) updateRuleJobStatus(ruleID, jobId, status string) {
+	idx := common.RulesIndex(c.IndexPrefix)
+	err := c.OS.Update(idx, ruleID, map[string]interface{}{
+		"jobId":        jobId,
+		"jobStatus":    status,
+		"jobStartedAt": time.Now().Format(time.RFC3339),
+	})
+	if err != nil {
+		log.Printf("[CEP] jobId 저장 실패: %s/%s - %v", idx, ruleID, err)
+	}
 }
 
 func (c *JobController) Status(ctx echo.Context) error {

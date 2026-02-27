@@ -73,6 +73,18 @@ func (c *OSClient) Refresh(index string) {
 	http.Post(c.BaseURL+"/"+index+"/_refresh", "application/json", nil)
 }
 
+func (c *OSClient) Update(index, docID string, fields map[string]interface{}) error {
+	body, _ := json.Marshal(map[string]interface{}{"doc": fields})
+	req, _ := http.NewRequest("POST", c.BaseURL+"/"+index+"/_update/"+docID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
 func (c *OSClient) Delete(index, docID string) error {
 	req, _ := http.NewRequest("DELETE", c.BaseURL+"/"+index+"/_doc/"+docID, nil)
 	resp, err := Client.Do(req)
