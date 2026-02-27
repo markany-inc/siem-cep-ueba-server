@@ -78,31 +78,34 @@ func (c *JobController) ReloadAll() (int, error) {
 		return 0, err
 	}
 
-	// 1. 룰에 저장된 jobId로 취소
-	cancelCount := 0
+	// 1. 룰에 저장된 jobId 수집
+	toCancel := make(map[string]string) // jobId → name
 	for _, doc := range docs {
 		if jobId, ok := doc["jobId"].(string); ok && jobId != "" {
 			name, _ := doc["name"].(string)
-			short := jobId
-			if len(short) > 8 {
-				short = short[:8]
-			}
-			log.Printf("[CEP] 기존 Job 취소 (룰): %s (%s)", name, short)
-			c.Flink.CancelJobByID(jobId)
-			cancelCount++
+			toCancel[jobId] = name
 		}
 	}
 
-	// 2. Flink에서 실행 중인 CEP Job도 취소 (orphan 정리)
+	// 2. Flink에서 실행 중인 CEP Job도 추가
 	for jid, name := range c.Flink.GetRunningCEPJobs() {
-		log.Printf("[CEP] 기존 Job 취소 (Flink): %s", name)
-		c.Flink.CancelJobByID(jid)
-		cancelCount++
+		toCancel[jid] = name
 	}
 
-	// 취소 완료 대기
-	if cancelCount > 0 {
-		time.Sleep(3 * time.Second)
+	// 3. 일괄 취소 요청
+	for jid, name := range toCancel {
+		log.Printf("[CEP] Job 취소: %s", name)
+		c.Flink.CancelJobByID(jid)
+	}
+
+	// 4. 취소 완료 대기 (RUNNING 상태 Job이 없을 때까지, 최대 10초)
+	if len(toCancel) > 0 {
+		for i := 0; i < 20; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if len(c.Flink.GetRunningCEPJobs()) == 0 {
+				break
+			}
+		}
 	}
 
 	type ruleJob struct {
