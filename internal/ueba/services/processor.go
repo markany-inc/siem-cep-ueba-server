@@ -224,6 +224,9 @@ func initialize() {
 	ensureBaselinesFresh()
 	currentDate = time.Now().In(loc).Format("2006-01-02")
 	recoverTodayState()
+	// 새 유저 프로필 생성 후 다시 로드
+	time.Sleep(500 * time.Millisecond)
+	loadUserProfiles()
 	log.Println("[INIT] 초기화 완료")
 }
 
@@ -318,6 +321,7 @@ func initUsersFromPrevScores() {
 					RuleScores: make(map[string]float64), LastUpdated: now, Dirty: true,
 				}
 				count++
+				ensureUserProfile(uid)
 			}
 			userStatesMu.Unlock()
 		},
@@ -477,8 +481,20 @@ func getOrCreateState(uid string) *UserState {
 			LastUpdated:   time.Now(),
 		}
 		userStates[uid] = state
+		// 새 유저 프로필 자동 생성 (normal)
+		ensureUserProfile(uid)
 	}
 	return state
+}
+
+func ensureUserProfile(uid string) {
+	userProfilesMu.RLock()
+	_, exists := userProfiles[uid]
+	userProfilesMu.RUnlock()
+	if exists {
+		return
+	}
+	go SetUserContext(uid, "normal")
 }
 
 // buildRuleESQuery: UEBA 룰의 match 조건을 OpenSearch bool 쿼리로 변환
