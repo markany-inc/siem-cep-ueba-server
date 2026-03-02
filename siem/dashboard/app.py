@@ -59,6 +59,24 @@ async def get_ueba_config():
         pass
     return {"tiers": {"green_max": 40, "yellow_max": 99, "red_max": 150}}
 
+_user_profiles_cache = {}
+_user_profiles_time = None
+
+async def get_user_profiles():
+    global _user_profiles_cache, _user_profiles_time
+    now = datetime.now()
+    if _user_profiles_cache and _user_profiles_time and (now - _user_profiles_time).seconds < 30:
+        return _user_profiles_cache
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{UEBA_URL}/api/users/profiles", timeout=5)
+            _user_profiles_cache = r.json()
+            _user_profiles_time = now
+            return _user_profiles_cache
+    except:
+        pass
+    return {}
+
 # WebSocket 연결 관리
 class ConnectionManager:
     def __init__(self):
@@ -184,6 +202,8 @@ async def dashboard(request: Request):
     })
     # top 10 사용자 + 점수 변화 계산
     yesterday = await get_yesterday_scores()
+    profiles = await get_user_profiles()
+    multipliers = (await get_ueba_config()).get("multipliers", {})
     top_users = []
     ueba_last_update = ""
     for bucket in ueba.get("aggregations", {}).get("byUser", {}).get("buckets", []):
@@ -195,6 +215,10 @@ async def dashboard(request: Request):
             # 어제 최종 점수와 비교
             prev_score = yesterday.get(current.get("userId", ""), current["riskScore"])
             current["scoreDiff"] = current["riskScore"] - prev_score
+            # 상황가중치 정보 추가
+            ctx = profiles.get(current.get("userId", ""), "")
+            current["context"] = ctx
+            current["contextName"] = multipliers.get(ctx, {}).get("name", "") if ctx else ""
             top_users.append(current)
     # 점수 내림차순 정렬 후 상위 10명
     top_users = sorted(top_users, key=lambda x: x.get("riskScore", 0), reverse=True)[:10]
