@@ -92,12 +92,19 @@ var (
 	baselines   = make(map[string]*Baseline)
 	baselinesMu sync.RWMutex
 
-	userProfiles   = make(map[string]string) // userId → context (departing, vip 등)
+	userProfiles   = make(map[string]*UserProfile)
 	userProfilesMu sync.RWMutex
 
 	currentDate   string
 	currentDateMu sync.RWMutex
 )
+
+type UserProfile struct {
+	Context   string `json:"context"`
+	StartDate string `json:"startDate,omitempty"` // YYYY-MM-DD
+	EndDate   string `json:"endDate,omitempty"`   // YYYY-MM-DD, 빈값이면 무제한
+	Note      string `json:"note,omitempty"`
+}
 
 // ===== 구조체 =====
 
@@ -907,15 +914,35 @@ func calculateStateScore(userID string, state *UserState) {
 // getContextMultiplier는 유저의 상황가중치를 반환한다.
 func getContextMultiplier(userID string, cfg *Config) float64 {
 	userProfilesMu.RLock()
-	ctx := userProfiles[userID]
+	profile := userProfiles[userID]
 	userProfilesMu.RUnlock()
-	if ctx == "" || cfg.Multipliers == nil {
+	
+	ctx := getEffectiveContext(profile)
+	if ctx == "" || ctx == "normal" || cfg.Multipliers == nil {
 		return 1.0
 	}
 	if m, ok := cfg.Multipliers[ctx]; ok {
 		return m.Multiplier
 	}
 	return 1.0
+}
+
+// getEffectiveContext는 기간을 체크하여 유효한 context를 반환
+func getEffectiveContext(profile *UserProfile) string {
+	if profile == nil {
+		return "normal"
+	}
+	today := time.Now().In(loc).Format("2006-01-02")
+	
+	// 시작일 체크: 시작일이 있고 오늘보다 미래면 아직 적용 안 됨
+	if profile.StartDate != "" && profile.StartDate > today {
+		return "normal"
+	}
+	// 종료일 체크: 종료일이 있고 오늘보다 과거면 만료됨
+	if profile.EndDate != "" && profile.EndDate < today {
+		return "normal"
+	}
+	return profile.Context
 }
 
 // isColdStart는 유저의 baseline 샘플일수가 cold_start_min_days 미만인지 확인한다.
@@ -2136,8 +2163,11 @@ func loadUserProfiles() {
 		Hits struct {
 			Hits []struct {
 				Source struct {
-					UserID  string `json:"userId"`
-					Context string `json:"context"`
+					UserID    string `json:"userId"`
+					Context   string `json:"context"`
+					StartDate string `json:"startDate"`
+					EndDate   string `json:"endDate"`
+					Note      string `json:"note"`
 				} `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
@@ -2146,22 +2176,30 @@ func loadUserProfiles() {
 
 	userProfilesMu.Lock()
 	for _, h := range result.Hits.Hits {
-		if h.Source.UserID != "" && h.Source.Context != "" {
-			userProfiles[h.Source.UserID] = h.Source.Context
+		if h.Source.UserID != "" {
+			userProfiles[h.Source.UserID] = &UserProfile{
+				Context:   h.Source.Context,
+				StartDate: h.Source.StartDate,
+				EndDate:   h.Source.EndDate,
+				Note:      h.Source.Note,
+			}
 		}
 	}
 	userProfilesMu.Unlock()
 	log.Printf("[INIT] 유저 프로필 로드: %d명", len(userProfiles))
 }
 
-func SetUserContext(userID, context string) error {
-	if context == "" {
-		context = "normal"
+func SetUserProfile(userID string, profile *UserProfile) error {
+	if profile.Context == "" {
+		profile.Context = "normal"
 	}
 	doc := map[string]interface{}{
 		"type":      "profile",
 		"userId":    userID,
-		"context":   context,
+		"context":   profile.Context,
+		"startDate": profile.StartDate,
+		"endDate":   profile.EndDate,
+		"note":      profile.Note,
 		"updatedAt": time.Now().In(loc).Format(time.RFC3339),
 	}
 	body, _ := json.Marshal(doc)
@@ -2173,23 +2211,34 @@ func SetUserContext(userID, context string) error {
 	}
 	resp.Body.Close()
 
-	// 메모리 갱신
 	userProfilesMu.Lock()
-	userProfiles[userID] = context
+	userProfiles[userID] = profile
 	userProfilesMu.Unlock()
 	return nil
 }
 
-func GetUserContext(userID string) string {
+// SetUserContext는 기존 API 호환용 (기간 없이 context만 설정)
+func SetUserContext(userID, context string) error {
+	return SetUserProfile(userID, &UserProfile{Context: context})
+}
+
+func GetUserProfile(userID string) *UserProfile {
 	userProfilesMu.RLock()
 	defer userProfilesMu.RUnlock()
 	return userProfiles[userID]
 }
 
-func GetAllUserProfiles() map[string]string {
+func GetUserContext(userID string) string {
+	userProfilesMu.RLock()
+	profile := userProfiles[userID]
+	userProfilesMu.RUnlock()
+	return getEffectiveContext(profile)
+}
+
+func GetAllUserProfiles() map[string]*UserProfile {
 	userProfilesMu.RLock()
 	defer userProfilesMu.RUnlock()
-	result := make(map[string]string, len(userProfiles))
+	result := make(map[string]*UserProfile, len(userProfiles))
 	for k, v := range userProfiles {
 		result[k] = v
 	}

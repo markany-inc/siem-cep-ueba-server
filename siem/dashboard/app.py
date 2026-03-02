@@ -284,9 +284,8 @@ async def user_context_page(request: Request):
 @app.put("/api/user-context/{user_id}")
 async def update_user_context(user_id: str, request: Request):
     data = await request.json()
-    context = data.get("context", "normal")
     async with httpx.AsyncClient() as client:
-        r = await client.put(f"{UEBA_URL}/api/users/{user_id}/context", json={"context": context}, timeout=5)
+        r = await client.put(f"{UEBA_URL}/api/users/{user_id}/context", json=data, timeout=5)
         return r.json()
 
 @app.get("/user/{user_id}", response_class=HTMLResponse)

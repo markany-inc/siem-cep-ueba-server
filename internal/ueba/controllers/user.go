@@ -56,29 +56,58 @@ func (c *UserController) Scores(ctx echo.Context) error {
 	return ctx.JSON(200, services.GetUserScores(draw, start, length, search, sortField, orderDir))
 }
 
-// SetContext: 유저 상황가중치 설정
+// SetContext: 유저 상황가중치 설정 (기간 포함)
 func (c *UserController) SetContext(ctx echo.Context) error {
 	userID := ctx.Param("id")
 	var req struct {
-		Context string `json:"context"`
+		Context   string `json:"context"`
+		StartDate string `json:"startDate"`
+		EndDate   string `json:"endDate"`
+		Note      string `json:"note"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return ctx.JSON(400, map[string]string{"error": "invalid request"})
 	}
-	if err := services.SetUserContext(userID, req.Context); err != nil {
+	profile := &services.UserProfile{
+		Context:   req.Context,
+		StartDate: req.StartDate,
+		EndDate:   req.EndDate,
+		Note:      req.Note,
+	}
+	if err := services.SetUserProfile(userID, profile); err != nil {
 		return ctx.JSON(500, map[string]string{"error": err.Error()})
 	}
-	return ctx.JSON(200, map[string]string{"status": "ok", "userId": userID, "context": req.Context})
+	return ctx.JSON(200, map[string]interface{}{
+		"status": "ok", "userId": userID,
+		"context": req.Context, "startDate": req.StartDate, "endDate": req.EndDate,
+	})
 }
 
-// GetContext: 유저 상황가중치 조회
+// GetContext: 유저 상황가중치 조회 (기간 포함)
 func (c *UserController) GetContext(ctx echo.Context) error {
 	userID := ctx.Param("id")
-	context := services.GetUserContext(userID)
-	return ctx.JSON(200, map[string]string{"userId": userID, "context": context})
+	profile := services.GetUserProfile(userID)
+	if profile == nil {
+		return ctx.JSON(200, map[string]interface{}{"userId": userID, "context": "normal"})
+	}
+	effectiveContext := services.GetUserContext(userID)
+	return ctx.JSON(200, map[string]interface{}{
+		"userId": userID, "context": profile.Context,
+		"startDate": profile.StartDate, "endDate": profile.EndDate, "note": profile.Note,
+		"effectiveContext": effectiveContext,
+	})
 }
 
 // ListProfiles: 전체 유저 프로필 목록
 func (c *UserController) ListProfiles(ctx echo.Context) error {
-	return ctx.JSON(200, services.GetAllUserProfiles())
+	profiles := services.GetAllUserProfiles()
+	result := make(map[string]interface{})
+	for uid, p := range profiles {
+		effectiveCtx := services.GetUserContext(uid)
+		result[uid] = map[string]interface{}{
+			"context": p.Context, "startDate": p.StartDate, "endDate": p.EndDate,
+			"note": p.Note, "effectiveContext": effectiveCtx,
+		}
+	}
+	return ctx.JSON(200, result)
 }

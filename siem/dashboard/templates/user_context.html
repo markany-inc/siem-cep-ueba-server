@@ -67,61 +67,131 @@
                         <th class="px-5 py-3 text-left">사용자 ID</th>
                         <th class="px-5 py-3 text-left">현재 상황</th>
                         <th class="px-5 py-3 text-left">가중치</th>
+                        <th class="px-5 py-3 text-left">기간</th>
                         <th class="px-5 py-3 text-left">변경</th>
                     </tr>
                 </thead>
                 <tbody id="userList" class="divide-y divide-gray-100">
-                    {% for userId, context in profiles.items() %}
+                    {% for userId, profile in profiles.items() %}
                     <tr class="hover:bg-gray-50" data-user="{{ userId }}">
                         <td class="px-5 py-3">
                             <a href="/user/{{ userId }}" class="text-sm text-blue-600 hover:text-blue-800 font-medium">{{ userId }}</a>
                         </td>
                         <td class="px-5 py-3">
-                            <span class="context-badge px-2 py-1 text-xs font-medium rounded-full {% if context == 'departing' %}bg-red-100 text-red-700{% elif context == 'blacklist' %}bg-gray-800 text-white{% elif context == 'contractor' %}bg-purple-100 text-purple-700{% elif context == 'vacation' %}bg-cyan-100 text-cyan-700{% elif context == 'probation' %}bg-yellow-100 text-yellow-700{% elif context == 'vip' %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">
-                                {{ multipliers.get(context, {}).get('name', context) }}
+                            <span class="context-badge px-2 py-1 text-xs font-medium rounded-full {% if profile.effectiveContext == 'departing' %}bg-red-100 text-red-700{% elif profile.effectiveContext == 'blacklist' %}bg-gray-800 text-white{% elif profile.effectiveContext == 'contractor' %}bg-purple-100 text-purple-700{% elif profile.effectiveContext == 'vacation' %}bg-cyan-100 text-cyan-700{% elif profile.effectiveContext == 'probation' %}bg-yellow-100 text-yellow-700{% elif profile.effectiveContext == 'vip' %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">
+                                {{ multipliers.get(profile.effectiveContext, {}).get('name', profile.effectiveContext) }}
                             </span>
+                            {% if profile.context != profile.effectiveContext %}
+                            <span class="ml-1 text-[10px] text-gray-400">(설정: {{ multipliers.get(profile.context, {}).get('name', profile.context) }})</span>
+                            {% endif %}
                         </td>
                         <td class="px-5 py-3 text-sm text-gray-600">
-                            ×{{ multipliers.get(context, {}).get('multiplier', 1.0) }}
+                            ×{{ multipliers.get(profile.effectiveContext, {}).get('multiplier', 1.0) }}
+                        </td>
+                        <td class="px-5 py-3 text-xs text-gray-500">
+                            {% if profile.startDate or profile.endDate %}
+                            {{ profile.startDate or '~' }} ~ {{ profile.endDate or '무제한' }}
+                            {% else %}
+                            -
+                            {% endif %}
                         </td>
                         <td class="px-5 py-3">
-                            <select class="context-select text-sm border border-gray-300 rounded px-2 py-1" data-user="{{ userId }}">
-                                {% for key, val in multipliers.items() %}
-                                <option value="{{ key }}" {% if key == context %}selected{% endif %}>{{ val.name }} (×{{ val.multiplier }})</option>
-                                {% endfor %}
-                            </select>
+                            <button class="edit-btn text-xs text-blue-600 hover:text-blue-800" data-user="{{ userId }}" data-context="{{ profile.context }}" data-start="{{ profile.startDate }}" data-end="{{ profile.endDate }}" data-note="{{ profile.note }}">수정</button>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+
+        <!-- 수정 모달 -->
+        <div id="editModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+            <div class="bg-white rounded-xl p-6 w-96 shadow-xl">
+                <h3 class="text-lg font-semibold mb-4">상황 설정</h3>
+                <input type="hidden" id="modalUserId">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">상황</label>
+                        <select id="modalContext" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                            {% for key, val in multipliers.items() %}
+                            <option value="{{ key }}">{{ val.name }} (×{{ val.multiplier }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">시작일</label>
+                            <input type="date" id="modalStartDate" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">종료일</label>
+                            <input type="date" id="modalEndDate" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500">* 종료일 비워두면 무제한</p>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">메모</label>
+                        <input type="text" id="modalNote" class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="예: 3월 휴가">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button id="modalCancel" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">취소</button>
+                    <button id="modalSave" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">저장</button>
+                </div>
+            </div>
+        </div>
     </main>
 
     <script>
         document.getElementById('totalCount').textContent = document.querySelectorAll('#userList tr').length;
+        const modal = document.getElementById('editModal');
 
-        document.querySelectorAll('.context-select').forEach(select => {
-            select.addEventListener('change', async function() {
-                const userId = this.dataset.user;
-                const context = this.value;
-                const row = this.closest('tr');
-                
-                try {
-                    const res = await fetch(`/api/user-context/${userId}`, {
-                        method: 'PUT',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({context})
-                    });
-                    if (res.ok) {
-                        location.reload();
-                    } else {
-                        alert('변경 실패');
-                    }
-                } catch (e) {
-                    alert('오류: ' + e.message);
-                }
+        document.querySelectorAll('.edit-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.getElementById('modalUserId').value = this.dataset.user;
+                document.getElementById('modalContext').value = this.dataset.context || 'normal';
+                document.getElementById('modalStartDate').value = this.dataset.start || '';
+                document.getElementById('modalEndDate').value = this.dataset.end || '';
+                document.getElementById('modalNote').value = this.dataset.note || '';
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
             });
+        });
+
+        document.getElementById('modalCancel').addEventListener('click', () => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        });
+
+        document.getElementById('modalSave').addEventListener('click', async () => {
+            const userId = document.getElementById('modalUserId').value;
+            const data = {
+                context: document.getElementById('modalContext').value,
+                startDate: document.getElementById('modalStartDate').value,
+                endDate: document.getElementById('modalEndDate').value,
+                note: document.getElementById('modalNote').value
+            };
+            try {
+                const res = await fetch(`/api/user-context/${userId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    location.reload();
+                } else {
+                    alert('저장 실패');
+                }
+            } catch (e) {
+                alert('오류: ' + e.message);
+            }
+        });
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
         });
     </script>
 </body>
