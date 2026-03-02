@@ -216,7 +216,8 @@ async def dashboard(request: Request):
             prev_score = yesterday.get(current.get("userId", ""), current["riskScore"])
             current["scoreDiff"] = current["riskScore"] - prev_score
             # 상황가중치 정보 추가
-            ctx = profiles.get(current.get("userId", ""), "")
+            profile = profiles.get(current.get("userId", ""), {})
+            ctx = profile.get("effectiveContext", "") if isinstance(profile, dict) else ""
             current["context"] = ctx
             current["contextName"] = multipliers.get(ctx, {}).get("name", "") if ctx else ""
             top_users.append(current)
