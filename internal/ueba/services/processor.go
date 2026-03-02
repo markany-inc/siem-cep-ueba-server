@@ -2154,6 +2154,9 @@ func loadUserProfiles() {
 }
 
 func SetUserContext(userID, context string) error {
+	if context == "" {
+		context = "normal"
+	}
 	doc := map[string]interface{}{
 		"type":      "profile",
 		"userId":    userID,
@@ -2171,11 +2174,7 @@ func SetUserContext(userID, context string) error {
 
 	// 메모리 갱신
 	userProfilesMu.Lock()
-	if context == "" || context == "normal" {
-		delete(userProfiles, userID)
-	} else {
-		userProfiles[userID] = context
-	}
+	userProfiles[userID] = context
 	userProfilesMu.Unlock()
 	return nil
 }

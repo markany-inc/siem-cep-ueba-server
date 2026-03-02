@@ -212,8 +212,8 @@
                             <tr class="hover:bg-gray-50 transition-colors">
                                 <td class="px-4 py-3">
                                     <a href="/user/{{ user.userId }}" class="text-sm text-blue-600 hover:text-blue-800 font-medium">{{ user.userId }}</a>
-                                    {% if user.context and user.context != 'normal' %}
-                                    <span class="ml-1 px-1.5 py-0.5 text-[10px] rounded {% if user.context == 'departing' %}bg-red-200 text-red-700{% elif user.context == 'blacklist' %}bg-gray-800 text-white{% elif user.context == 'contractor' %}bg-purple-100 text-purple-700{% elif user.context == 'vacation' %}bg-cyan-100 text-cyan-700{% elif user.context == 'probation' %}bg-yellow-100 text-yellow-700{% elif user.context == 'vip' %}bg-emerald-100 text-emerald-700{% else %}bg-gray-100 text-gray-600{% endif %}" title="{{ user.contextName }}">{{ user.contextName }}</span>
+                                    {% if user.context %}
+                                    <span class="ml-1 px-1.5 py-0.5 text-[10px] rounded {% if user.context == 'departing' %}bg-red-200 text-red-700{% elif user.context == 'blacklist' %}bg-gray-800 text-white{% elif user.context == 'contractor' %}bg-purple-100 text-purple-700{% elif user.context == 'vacation' %}bg-cyan-100 text-cyan-700{% elif user.context == 'probation' %}bg-yellow-100 text-yellow-700{% elif user.context == 'vip' %}bg-emerald-100 text-emerald-700{% elif user.context == 'normal' %}bg-slate-100 text-slate-600{% else %}bg-gray-100 text-gray-600{% endif %}" title="{{ user.contextName }}">{{ user.contextName }}</span>
                                     {% endif %}
                                 </td>
                                 <td class="px-4 py-3 text-sm font-bold {% if user.riskScore > tiers.red_max|default(150) %}text-red-600{% elif user.riskScore > tiers.yellow_max|default(99) %}text-orange-600{% elif user.riskScore > tiers.green_max|default(40) %}text-amber-600{% else %}text-green-600{% endif %}">{{ "%.2f"|format(user.riskScore) }}점</td>
