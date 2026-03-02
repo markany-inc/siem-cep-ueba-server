@@ -271,6 +271,23 @@ async def users(request: Request, level: str = None):
     config = await get_ueba_config()
     return templates.TemplateResponse("users.html", {"request": request, "users": users_list, "level": level, "tiers": config.get("tiers", {})})
 
+@app.get("/user-context", response_class=HTMLResponse)
+async def user_context_page(request: Request):
+    profiles = await get_user_profiles()
+    config = await get_ueba_config()
+    multipliers = config.get("multipliers", {})
+    # userId 기준 정렬
+    sorted_profiles = dict(sorted(profiles.items()))
+    return templates.TemplateResponse("user_context.html", {"request": request, "profiles": sorted_profiles, "multipliers": multipliers})
+
+@app.put("/api/user-context/{user_id}")
+async def update_user_context(user_id: str, request: Request):
+    data = await request.json()
+    context = data.get("context", "normal")
+    async with httpx.AsyncClient() as client:
+        r = await client.put(f"{UEBA_URL}/api/users/{user_id}/context", json={"context": context}, timeout=5)
+        return r.json()
+
 @app.get("/user/{user_id}", response_class=HTMLResponse)
 async def user_detail(request: Request, user_id: str):
     today_filter = {"range": {"@timestamp": {"gte": "now/d", "time_zone": "Asia/Seoul"}}}
