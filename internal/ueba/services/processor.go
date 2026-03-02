@@ -831,6 +831,7 @@ func frequencyFunc(count float64, mode string) float64 {
 func calculateStateScore(userID string, state *UserState) {
 	cfg := loadConfig()
 	rules := loadRules()
+	multiplier := getContextMultiplier(userID, cfg)
 
 	var ruleScore float64
 	ruleScores := make(map[string]float64)
@@ -840,7 +841,8 @@ func calculateStateScore(userID string, state *UserState) {
 		}
 		val := state.EventValues[rule.Name]
 		if val > 0 {
-			s := rule.Weight * frequencyFunc(val, cfg.Anomaly.FrequencyFunction)
+			// reference: Wi × log(Ci+1) × Mcontext
+			s := rule.Weight * frequencyFunc(val, cfg.Anomaly.FrequencyFunction) * multiplier
 			ruleScore += s
 			ruleScores[rule.Name] = math.Round(s*100) / 100
 		}
@@ -898,9 +900,8 @@ func calculateStateScore(userID string, state *UserState) {
 	days = effectiveDays(days, cfg.Decay.WeekendMode)
 	decayed := state.PrevScore * math.Pow(cfg.Decay.Lambda, float64(days))
 	
-	// 상황가중치 적용
-	multiplier := getContextMultiplier(userID, cfg)
-	state.RiskScore = math.Round((decayed+ruleScore+anomalyScore)*multiplier*100) / 100
+	// ruleScore에 이미 상황가중치 적용됨
+	state.RiskScore = math.Round((decayed+ruleScore+anomalyScore)*100) / 100
 }
 
 // getContextMultiplier는 유저의 상황가중치를 반환한다.
