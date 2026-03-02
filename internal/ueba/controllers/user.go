@@ -55,3 +55,30 @@ func (c *UserController) Scores(ctx echo.Context) error {
 
 	return ctx.JSON(200, services.GetUserScores(draw, start, length, search, sortField, orderDir))
 }
+
+// SetContext: 유저 상황가중치 설정
+func (c *UserController) SetContext(ctx echo.Context) error {
+	userID := ctx.Param("id")
+	var req struct {
+		Context string `json:"context"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return ctx.JSON(400, map[string]string{"error": "invalid request"})
+	}
+	if err := services.SetUserContext(userID, req.Context); err != nil {
+		return ctx.JSON(500, map[string]string{"error": err.Error()})
+	}
+	return ctx.JSON(200, map[string]string{"status": "ok", "userId": userID, "context": req.Context})
+}
+
+// GetContext: 유저 상황가중치 조회
+func (c *UserController) GetContext(ctx echo.Context) error {
+	userID := ctx.Param("id")
+	context := services.GetUserContext(userID)
+	return ctx.JSON(200, map[string]string{"userId": userID, "context": context})
+}
+
+// ListProfiles: 전체 유저 프로필 목록
+func (c *UserController) ListProfiles(ctx echo.Context) error {
+	return ctx.JSON(200, services.GetAllUserProfiles())
+}

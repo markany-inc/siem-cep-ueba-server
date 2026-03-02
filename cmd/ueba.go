@@ -62,9 +62,12 @@ var uebaCmd = &cobra.Command{
 		// UEBA 사용자 API
 		e.GET("/api/users", userCtrl.List)
 		e.GET("/api/users/scores", userCtrl.Scores)
+		e.GET("/api/users/profiles", userCtrl.ListProfiles)
 		e.GET("/api/users/:id", userCtrl.Get)
 		e.GET("/api/users/:id/history", userCtrl.History)
 		e.GET("/api/users/:id/hourly", userCtrl.Hourly)
+		e.GET("/api/users/:id/context", userCtrl.GetContext)
+		e.PUT("/api/users/:id/context", userCtrl.SetContext)
 
 		// UEBA 전체 로직 시작
 		go services.StartProcessor(cfg)

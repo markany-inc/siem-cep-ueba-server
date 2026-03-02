@@ -92,6 +92,9 @@ var (
 	baselines   = make(map[string]*Baseline)
 	baselinesMu sync.RWMutex
 
+	userProfiles   = make(map[string]string) // userId → context (departing, vip 등)
+	userProfilesMu sync.RWMutex
+
 	currentDate   string
 	currentDateMu sync.RWMutex
 )
@@ -148,9 +151,16 @@ type RuleUEBA struct {
 }
 
 type Config struct {
-	Anomaly AnomalyConfig `json:"anomaly"`
-	Decay   DecayConfig   `json:"decay"`
-	Tiers   TierConfig    `json:"tiers"`
+	Anomaly     AnomalyConfig            `json:"anomaly"`
+	Decay       DecayConfig              `json:"decay"`
+	Tiers       TierConfig               `json:"tiers"`
+	Multipliers map[string]MultiplierDef `json:"multipliers"`
+}
+
+type MultiplierDef struct {
+	Multiplier float64 `json:"multiplier"`
+	Name       string  `json:"name"`
+	Desc       string  `json:"desc"`
 }
 
 type AnomalyConfig struct {
@@ -210,6 +220,7 @@ func initialize() {
 	loadConfig()
 	loadRules()
 	loadAllBaselines()
+	loadUserProfiles()
 	ensureBaselinesFresh()
 	currentDate = time.Now().In(loc).Format("2006-01-02")
 	recoverTodayState()
@@ -870,7 +881,24 @@ func calculateStateScore(userID string, state *UserState) {
 	}
 	days = effectiveDays(days, cfg.Decay.WeekendMode)
 	decayed := state.PrevScore * math.Pow(cfg.Decay.Lambda, float64(days))
-	state.RiskScore = math.Round((decayed+ruleScore+anomalyScore)*100) / 100
+	
+	// 상황가중치 적용
+	multiplier := getContextMultiplier(userID, cfg)
+	state.RiskScore = math.Round((decayed+ruleScore+anomalyScore)*multiplier*100) / 100
+}
+
+// getContextMultiplier는 유저의 상황가중치를 반환한다.
+func getContextMultiplier(userID string, cfg *Config) float64 {
+	userProfilesMu.RLock()
+	ctx := userProfiles[userID]
+	userProfilesMu.RUnlock()
+	if ctx == "" || cfg.Multipliers == nil {
+		return 1.0
+	}
+	if m, ok := cfg.Multipliers[ctx]; ok {
+		return m.Multiplier
+	}
+	return 1.0
 }
 
 // isColdStart는 유저의 baseline 샘플일수가 cold_start_min_days 미만인지 확인한다.
@@ -1770,6 +1798,7 @@ func ReloadCache() {
 	rulesMu.Unlock()
 	loadConfig()
 	loadRules()
+	loadUserProfiles()
 }
 
 func TriggerBaseline() {
@@ -2068,6 +2097,95 @@ func startKafkaConsumer() {
 		}
 	}
 	select {}
+}
+
+// ===== 유저 프로필 (상황가중치) =====
+
+func loadUserProfiles() {
+	query := map[string]interface{}{
+		"size": 1000,
+		"query": map[string]interface{}{
+			"term": map[string]interface{}{"type": "profile"},
+		},
+	}
+	body, _ := json.Marshal(query)
+	resp, err := httpClient.Post(fmt.Sprintf("%s/%s/_search", opensearchURL, common.BaselinesIndex(indexPrefix)), "application/json", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Hits struct {
+			Hits []struct {
+				Source struct {
+					UserID  string `json:"userId"`
+					Context string `json:"context"`
+				} `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	userProfilesMu.Lock()
+	for _, h := range result.Hits.Hits {
+		if h.Source.UserID != "" && h.Source.Context != "" {
+			userProfiles[h.Source.UserID] = h.Source.Context
+		}
+	}
+	userProfilesMu.Unlock()
+	log.Printf("[INIT] 유저 프로필 로드: %d명", len(userProfiles))
+}
+
+func SetUserContext(userID, context string) error {
+	doc := map[string]interface{}{
+		"type":      "profile",
+		"userId":    userID,
+		"context":   context,
+		"updatedAt": time.Now().In(loc).Format(time.RFC3339),
+	}
+	body, _ := json.Marshal(doc)
+	req, _ := http.NewRequest("PUT", fmt.Sprintf("%s/%s/_doc/%s_profile", opensearchURL, common.BaselinesIndex(indexPrefix), userID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+
+	// 메모리 갱신
+	userProfilesMu.Lock()
+	if context == "" || context == "normal" {
+		delete(userProfiles, userID)
+	} else {
+		userProfiles[userID] = context
+	}
+	userProfilesMu.Unlock()
+	return nil
+}
+
+func GetUserContext(userID string) string {
+	userProfilesMu.RLock()
+	defer userProfilesMu.RUnlock()
+	return userProfiles[userID]
+}
+
+func GetAllUserProfiles() map[string]string {
+	userProfilesMu.RLock()
+	defer userProfilesMu.RUnlock()
+	result := make(map[string]string, len(userProfiles))
+	for k, v := range userProfiles {
+		result[k] = v
+	}
+	return result
+}
+
+func ReloadConfig() {
+	configMu.Lock()
+	configCache = nil
+	configMu.Unlock()
+	loadConfig()
+	log.Println("[UEBA] 설정 리로드 완료")
 }
 
 // ===== Main =====
