@@ -273,10 +273,11 @@ async def users(request: Request, level: str = None):
 
 @app.get("/user-context", response_class=HTMLResponse)
 async def user_context_page(request: Request):
-    profiles = await get_user_profiles()
-    config = await get_ueba_config()
+    # 캐시 없이 직접 조회
+    async with httpx.AsyncClient() as client:
+        profiles = (await client.get(f"{UEBA_URL}/api/users/profiles", timeout=5)).json()
+        config = (await client.get(f"{UEBA_URL}/api/config", timeout=5)).json()
     multipliers = config.get("multipliers", {})
-    # userId 기준 정렬
     sorted_profiles = dict(sorted(profiles.items()))
     return templates.TemplateResponse("user_context.html", {"request": request, "profiles": sorted_profiles, "multipliers": multipliers})
 
