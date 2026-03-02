@@ -2174,10 +2174,10 @@ func loadUserProfiles() {
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
 
-	userProfilesMu.Lock()
+	newProfiles := make(map[string]*UserProfile)
 	for _, h := range result.Hits.Hits {
 		if h.Source.UserID != "" {
-			userProfiles[h.Source.UserID] = &UserProfile{
+			newProfiles[h.Source.UserID] = &UserProfile{
 				Context:   h.Source.Context,
 				StartDate: h.Source.StartDate,
 				EndDate:   h.Source.EndDate,
@@ -2185,6 +2185,8 @@ func loadUserProfiles() {
 			}
 		}
 	}
+	userProfilesMu.Lock()
+	userProfiles = newProfiles
 	userProfilesMu.Unlock()
 	log.Printf("[INIT] 유저 프로필 로드: %d명", len(userProfiles))
 }
