@@ -1007,6 +1007,10 @@ func isColdStart(userID string, state *UserState, cfg *Config) bool {
 func getBaseline(userID, msgID string) *Baseline {
 	baselinesMu.RLock()
 	bl := baselines[userID+"_"+msgID]
+	if bl == nil {
+		// fallback: global baseline (전체 유저 평균)
+		bl = baselines["_global_"+msgID]
+	}
 	baselinesMu.RUnlock()
 	return bl
 }
@@ -1334,10 +1338,26 @@ func updateBaselines() {
 		},
 		"aggs": map[string]interface{}{
 			"by_user": map[string]interface{}{
-				"terms": map[string]interface{}{"field": "userId", "size": 100000},
+				"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": 100000},
 				"aggs": map[string]interface{}{
 					"by_msgId": map[string]interface{}{
-						"terms": map[string]interface{}{"field": "msgId", "size": 50},
+						"terms": map[string]interface{}{"field": "msgId.keyword", "size": 50},
+						"aggs": map[string]interface{}{
+							"daily": map[string]interface{}{
+								"date_histogram": map[string]interface{}{
+									"field": "@timestamp", "calendar_interval": "day",
+								},
+							},
+						},
+					},
+				},
+			},
+			// global baseline: msgId별 전체 유저 평균
+			"global_by_msgId": map[string]interface{}{
+				"terms": map[string]interface{}{"field": "msgId.keyword", "size": 50},
+				"aggs": map[string]interface{}{
+					"per_user": map[string]interface{}{
+						"terms": map[string]interface{}{"field": "cefExtensions.suid.keyword", "size": 100000},
 						"aggs": map[string]interface{}{
 							"daily": map[string]interface{}{
 								"date_histogram": map[string]interface{}{
@@ -1376,6 +1396,20 @@ func updateBaselines() {
 					} `json:"by_msgId"`
 				} `json:"buckets"`
 			} `json:"by_user"`
+			GlobalByMsgId struct {
+				Buckets []struct {
+					Key     string `json:"key"`
+					PerUser struct {
+						Buckets []struct {
+							Daily struct {
+								Buckets []struct {
+									DocCount int `json:"doc_count"`
+								} `json:"buckets"`
+							} `json:"daily"`
+						} `json:"buckets"`
+					} `json:"per_user"`
+				} `json:"buckets"`
+			} `json:"global_by_msgId"`
 		} `json:"aggregations"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
@@ -1384,6 +1418,7 @@ func updateBaselines() {
 	count := 0
 
 	baselinesMu.Lock()
+	// 유저별 baseline
 	for _, ub := range result.Aggregations.ByUser.Buckets {
 		for _, mb := range ub.ByMsgId.Buckets {
 			counts := make([]float64, 0)
@@ -1406,12 +1441,51 @@ func updateBaselines() {
 			count++
 		}
 	}
+	
+	// global baseline: msgId별 전체 유저의 평균 baseline
+	globalCount := 0
+	for _, mb := range result.Aggregations.GlobalByMsgId.Buckets {
+		var allMeans, allStddevs []float64
+		maxDays := 0
+		for _, ub := range mb.PerUser.Buckets {
+			counts := make([]float64, 0)
+			for _, day := range ub.Daily.Buckets {
+				counts = append(counts, float64(day.DocCount))
+			}
+			if len(counts) == 0 {
+				continue
+			}
+			mean, stddev := calcMeanStddev(counts)
+			allMeans = append(allMeans, mean)
+			allStddevs = append(allStddevs, stddev)
+			if len(counts) > maxDays {
+				maxDays = len(counts)
+			}
+		}
+		if len(allMeans) == 0 {
+			continue
+		}
+		// 전체 유저 평균의 평균
+		globalMean, _ := calcMeanStddev(allMeans)
+		globalStddev, _ := calcMeanStddev(allStddevs)
+		bl := &Baseline{Mean: globalMean, Stddev: globalStddev, SampleDays: maxDays}
+		key := "_global_" + mb.Key
+		baselines[key] = bl
+
+		bulkBody.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%s"}}`, common.BaselinesIndex(indexPrefix), key))
+		bulkBody.WriteString("\n")
+		blJSON, _ := json.Marshal(bl)
+		bulkBody.Write(blJSON)
+		bulkBody.WriteString("\n")
+		count++
+		globalCount++
+	}
 	baselinesMu.Unlock()
 
 	if bulkBody.Len() > 0 {
 		httpClient.Post(opensearchURL+"/_bulk", "application/x-ndjson", &bulkBody)
 	}
-	log.Printf("[BASELINE] %d개 업데이트 완료", count)
+	log.Printf("[BASELINE] %d개 업데이트 완료 (global: %d개)", count, globalCount)
 }
 
 func calcMeanStddev(values []float64) (float64, float64) {
