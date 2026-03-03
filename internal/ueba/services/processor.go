@@ -199,9 +199,10 @@ type TierConfig struct {
 }
 
 type Baseline struct {
-	Mean       float64 `json:"mean"`
-	Stddev     float64 `json:"stddev"`
-	SampleDays int     `json:"sampleDays"`
+	Mean        float64 `json:"mean"`
+	Stddev      float64 `json:"stddev"`
+	SampleDays  int     `json:"sampleDays"`
+	LastUpdated string  `json:"lastUpdated,omitempty"` // baseline 갱신일
 }
 
 type Score struct {
@@ -1005,8 +1006,20 @@ func isColdStart(userID string, state *UserState, cfg *Config) bool {
 }
 
 func getBaseline(userID, msgID string) *Baseline {
+	cfg := loadConfig()
+	today := time.Now().In(loc)
+	maxStaledays := cfg.Anomaly.BaselineWindow // baseline_window 이상 오래되면 무효
+	
 	baselinesMu.RLock()
 	bl := baselines[userID+"_"+msgID]
+	// 오래된 baseline은 무효 처리 → global fallback
+	if bl != nil && bl.LastUpdated != "" {
+		if updated, err := time.ParseInLocation("2006-01-02", bl.LastUpdated, loc); err == nil {
+			if int(today.Sub(updated).Hours()/24) > maxStaledays {
+				bl = nil // 오래됨 → global로 fallback
+			}
+		}
+	}
 	if bl == nil {
 		// fallback: global baseline (전체 유저 평균)
 		bl = baselines["_global_"+msgID]
@@ -1417,6 +1430,7 @@ func updateBaselines() {
 
 	var bulkBody bytes.Buffer
 	count := 0
+	today := time.Now().In(loc).Format("2006-01-02")
 
 	baselinesMu.Lock()
 	// 유저별 baseline
@@ -1430,7 +1444,7 @@ func updateBaselines() {
 				continue
 			}
 			mean, stddev := calcMeanStddev(counts)
-			bl := &Baseline{Mean: mean, Stddev: stddev, SampleDays: len(counts)}
+			bl := &Baseline{Mean: mean, Stddev: stddev, SampleDays: len(counts), LastUpdated: today}
 			key := ub.Key + "_" + mb.Key
 			baselines[key] = bl
 
@@ -1469,7 +1483,7 @@ func updateBaselines() {
 		// 전체 유저 평균의 평균
 		globalMean, _ := calcMeanStddev(allMeans)
 		globalStddev, _ := calcMeanStddev(allStddevs)
-		bl := &Baseline{Mean: globalMean, Stddev: globalStddev, SampleDays: maxDays}
+		bl := &Baseline{Mean: globalMean, Stddev: globalStddev, SampleDays: maxDays, LastUpdated: today}
 		key := "_global_" + mb.Key
 		baselines[key] = bl
 
