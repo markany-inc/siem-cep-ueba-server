@@ -1224,6 +1224,7 @@ func checkDateRollover() {
 
 	go func() {
 		updateBaselines()
+		loadUserProfiles() // 만료된 상황가중치 정리
 		today := time.Now().In(loc).Format("2006-01-02")
 		meta, _ := json.Marshal(map[string]string{"updated_at": today})
 		req, _ := http.NewRequest("PUT",
@@ -2290,22 +2291,44 @@ func loadUserProfiles() {
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
 
+	today := time.Now().In(loc).Format("2006-01-02")
 	newProfiles := make(map[string]*UserProfile)
+	var expiredUsers []string
+	
 	for _, h := range result.Hits.Hits {
-		if h.Source.UserID != "" {
-			newProfiles[h.Source.UserID] = &UserProfile{
-				Context:     h.Source.Context,
-				StartDate:   h.Source.StartDate,
-				EndDate:     h.Source.EndDate,
-				Note:        h.Source.Note,
-				Whitelisted: h.Source.Whitelisted,
-			}
+		if h.Source.UserID == "" {
+			continue
 		}
+		profile := &UserProfile{
+			Context:     h.Source.Context,
+			StartDate:   h.Source.StartDate,
+			EndDate:     h.Source.EndDate,
+			Note:        h.Source.Note,
+			Whitelisted: h.Source.Whitelisted,
+		}
+		// 기간 만료 체크: endDate가 있고 오늘보다 과거면 만료
+		if profile.EndDate != "" && profile.EndDate < today && profile.Context != "normal" {
+			expiredUsers = append(expiredUsers, h.Source.UserID)
+			profile.Context = "normal"
+			profile.StartDate = ""
+			profile.EndDate = ""
+		}
+		newProfiles[h.Source.UserID] = profile
 	}
+	
 	userProfilesMu.Lock()
 	userProfiles = newProfiles
 	userProfilesMu.Unlock()
-	log.Printf("[INIT] 유저 프로필 로드: %d명", len(userProfiles))
+	
+	// 만료된 프로필 OpenSearch 업데이트
+	for _, uid := range expiredUsers {
+		go func(userID string) {
+			SetUserProfile(userID, &UserProfile{Context: "normal", Whitelisted: newProfiles[userID].Whitelisted})
+			log.Printf("[PROFILE] %s 상황가중치 만료 → normal", userID)
+		}(uid)
+	}
+	
+	log.Printf("[INIT] 유저 프로필 로드: %d명 (만료 정리: %d명)", len(userProfiles), len(expiredUsers))
 }
 
 func SetUserProfile(userID string, profile *UserProfile) error {
@@ -2316,11 +2339,20 @@ func SetUserProfile(userID string, profile *UserProfile) error {
 		"type":        "profile",
 		"userId":      userID,
 		"context":     profile.Context,
-		"startDate":   profile.StartDate,
-		"endDate":     profile.EndDate,
 		"note":        profile.Note,
 		"whitelisted": profile.Whitelisted,
 		"updatedAt":   time.Now().In(loc).Format(time.RFC3339),
+	}
+	// 빈 날짜는 null로 (OpenSearch date 필드 호환)
+	if profile.StartDate != "" {
+		doc["startDate"] = profile.StartDate
+	} else {
+		doc["startDate"] = nil
+	}
+	if profile.EndDate != "" {
+		doc["endDate"] = profile.EndDate
+	} else {
+		doc["endDate"] = nil
 	}
 	body, _ := json.Marshal(doc)
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("%s/%s/_doc/%s_profile", opensearchURL, common.BaselinesIndex(indexPrefix), userID), bytes.NewReader(body))
