@@ -184,8 +184,6 @@ type AnomalyConfig struct {
 	ColdStartMinDays  int     `json:"cold_start_min_days"`
 	BaselineWindow    int     `json:"baseline_window_days"`
 	FrequencyFunction string  `json:"frequency_function"`
-	MaxPerEvent       float64 `json:"max_per_event"` // 0이면 무제한
-	Scope             string  `json:"scope"`         // "all" or "rules_only"
 }
 
 type DecayConfig struct {
@@ -881,21 +879,9 @@ func calculateStateScore(userID string, state *UserState) {
 		}
 	}
 
-	// Anomaly 대상: scope 설정에 따라 결정
-	ruleMsgIDs := make(map[string]bool)
-	for _, rule := range rules {
-		if rule.Enabled {
-			ruleMsgIDs[rule.Match.MsgID] = true
-		}
-	}
-	scopeAll := cfg.Anomaly.Scope == "all"
-
+	// Anomaly: 모든 이벤트 타입에 대해 계산 (reference 방식)
 	var anomalyScore float64
 	for msgID, count := range state.EventCounts {
-		// scope가 rules_only면 룰에 등록된 msgId만
-		if !scopeAll && !ruleMsgIDs[msgID] {
-			continue
-		}
 		bl := getBaseline(userID, msgID)
 		if bl == nil || bl.SampleDays < cfg.Anomaly.ColdStartMinDays {
 			continue
@@ -906,12 +892,7 @@ func calculateStateScore(userID string, state *UserState) {
 		stddev := math.Max(bl.Stddev, cfg.Anomaly.SigmaFloor)
 		z := (float64(count) - bl.Mean) / stddev
 		if z > cfg.Anomaly.ZThreshold {
-			excess := cfg.Anomaly.Beta * (z - cfg.Anomaly.ZThreshold)
-			// anomaly 상한 적용 (0이면 무제한)
-			if cfg.Anomaly.MaxPerEvent > 0 {
-				excess = math.Min(excess, cfg.Anomaly.MaxPerEvent)
-			}
-			anomalyScore += excess
+			anomalyScore += cfg.Anomaly.Beta * (z - cfg.Anomaly.ZThreshold)
 		}
 	}
 
