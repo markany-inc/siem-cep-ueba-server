@@ -60,19 +60,21 @@ func (c *UserController) Scores(ctx echo.Context) error {
 func (c *UserController) SetContext(ctx echo.Context) error {
 	userID := ctx.Param("id")
 	var req struct {
-		Context   string `json:"context"`
-		StartDate string `json:"startDate"`
-		EndDate   string `json:"endDate"`
-		Note      string `json:"note"`
+		Context     string `json:"context"`
+		StartDate   string `json:"startDate"`
+		EndDate     string `json:"endDate"`
+		Note        string `json:"note"`
+		Whitelisted bool   `json:"whitelisted"`
 	}
 	if err := ctx.Bind(&req); err != nil {
 		return ctx.JSON(400, map[string]string{"error": "invalid request"})
 	}
 	profile := &services.UserProfile{
-		Context:   req.Context,
-		StartDate: req.StartDate,
-		EndDate:   req.EndDate,
-		Note:      req.Note,
+		Context:     req.Context,
+		StartDate:   req.StartDate,
+		EndDate:     req.EndDate,
+		Note:        req.Note,
+		Whitelisted: req.Whitelisted,
 	}
 	if err := services.SetUserProfile(userID, profile); err != nil {
 		return ctx.JSON(500, map[string]string{"error": err.Error()})
@@ -80,6 +82,7 @@ func (c *UserController) SetContext(ctx echo.Context) error {
 	return ctx.JSON(200, map[string]interface{}{
 		"status": "ok", "userId": userID,
 		"context": req.Context, "startDate": req.StartDate, "endDate": req.EndDate,
+		"whitelisted": req.Whitelisted,
 	})
 }
 
@@ -88,13 +91,13 @@ func (c *UserController) GetContext(ctx echo.Context) error {
 	userID := ctx.Param("id")
 	profile := services.GetUserProfile(userID)
 	if profile == nil {
-		return ctx.JSON(200, map[string]interface{}{"userId": userID, "context": "normal"})
+		return ctx.JSON(200, map[string]interface{}{"userId": userID, "context": "normal", "whitelisted": false})
 	}
 	effectiveContext := services.GetUserContext(userID)
 	return ctx.JSON(200, map[string]interface{}{
 		"userId": userID, "context": profile.Context,
 		"startDate": profile.StartDate, "endDate": profile.EndDate, "note": profile.Note,
-		"effectiveContext": effectiveContext,
+		"whitelisted": profile.Whitelisted, "effectiveContext": effectiveContext,
 	})
 }
 
@@ -106,7 +109,7 @@ func (c *UserController) ListProfiles(ctx echo.Context) error {
 		effectiveCtx := services.GetUserContext(uid)
 		result[uid] = map[string]interface{}{
 			"context": p.Context, "startDate": p.StartDate, "endDate": p.EndDate,
-			"note": p.Note, "effectiveContext": effectiveCtx,
+			"note": p.Note, "whitelisted": p.Whitelisted, "effectiveContext": effectiveCtx,
 		}
 	}
 	return ctx.JSON(200, result)

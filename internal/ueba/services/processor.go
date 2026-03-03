@@ -100,10 +100,11 @@ var (
 )
 
 type UserProfile struct {
-	Context   string `json:"context"`
-	StartDate string `json:"startDate,omitempty"` // YYYY-MM-DD
-	EndDate   string `json:"endDate,omitempty"`   // YYYY-MM-DD, 빈값이면 무제한
-	Note      string `json:"note,omitempty"`
+	Context     string `json:"context"`
+	StartDate   string `json:"startDate,omitempty"`
+	EndDate     string `json:"endDate,omitempty"`
+	Note        string `json:"note,omitempty"`
+	Whitelisted bool   `json:"whitelisted,omitempty"`
 }
 
 // ===== 구조체 =====
@@ -162,12 +163,18 @@ type Config struct {
 	Decay       DecayConfig              `json:"decay"`
 	Tiers       TierConfig               `json:"tiers"`
 	Multipliers map[string]MultiplierDef `json:"multipliers"`
+	FloorScore  FloorScoreConfig         `json:"floor_score"`
 }
 
 type MultiplierDef struct {
 	Multiplier float64 `json:"multiplier"`
 	Name       string  `json:"name"`
 	Desc       string  `json:"desc"`
+}
+
+type FloorScoreConfig struct {
+	Enabled bool    `json:"enabled"`
+	Default float64 `json:"default"`
 }
 
 type AnomalyConfig struct {
@@ -177,6 +184,8 @@ type AnomalyConfig struct {
 	ColdStartMinDays  int     `json:"cold_start_min_days"`
 	BaselineWindow    int     `json:"baseline_window_days"`
 	FrequencyFunction string  `json:"frequency_function"`
+	MaxPerEvent       float64 `json:"max_per_event"` // 0이면 무제한
+	Scope             string  `json:"scope"`         // "all" or "rules_only"
 }
 
 type DecayConfig struct {
@@ -838,6 +847,23 @@ func frequencyFunc(count float64, mode string) float64 {
 func calculateStateScore(userID string, state *UserState) {
 	cfg := loadConfig()
 	rules := loadRules()
+	
+	// 화이트리스트 유저는 점수 계산 스킵
+	if isWhitelisted(userID) {
+		state.RuleScore = 0
+		state.RuleScores = make(map[string]float64)
+		state.AnomalyScore = 0
+		state.ColdStart = false
+		// decay만 적용
+		days := state.DaysSinceLast
+		if days < 1 {
+			days = 1
+		}
+		days = effectiveDays(days, cfg.Decay.WeekendMode)
+		state.RiskScore = math.Round(state.PrevScore*math.Pow(cfg.Decay.Lambda, float64(days))*100) / 100
+		return
+	}
+	
 	multiplier := getContextMultiplier(userID, cfg)
 
 	var ruleScore float64
@@ -848,28 +874,31 @@ func calculateStateScore(userID string, state *UserState) {
 		}
 		val := state.EventValues[rule.Name]
 		if val > 0 {
-			// reference: Wi × log(Ci+1) × Mcontext
 			s := rule.Weight * frequencyFunc(val, cfg.Anomaly.FrequencyFunction) * multiplier
 			ruleScore += s
 			ruleScores[rule.Name] = math.Round(s*100) / 100
 		}
 	}
 
-	// Anomaly: 룰에 등록된 msgId만 대상 (reference 방식)
+	// Anomaly 대상: scope 설정에 따라 결정
 	ruleMsgIDs := make(map[string]bool)
 	for _, rule := range rules {
 		if rule.Enabled {
 			ruleMsgIDs[rule.Match.MsgID] = true
 		}
 	}
+	scopeAll := cfg.Anomaly.Scope == "all"
 
 	var anomalyScore float64
 	for msgID, count := range state.EventCounts {
+		// scope가 rules_only면 룰에 등록된 msgId만
+		if !scopeAll && !ruleMsgIDs[msgID] {
+			continue
+		}
 		bl := getBaseline(userID, msgID)
 		if bl == nil || bl.SampleDays < cfg.Anomaly.ColdStartMinDays {
 			continue
 		}
-		// mean이 0이면 anomaly 계산 제외 (데이터 부족)
 		if bl.Mean < 1 {
 			continue
 		}
@@ -877,13 +906,11 @@ func calculateStateScore(userID string, state *UserState) {
 		z := (float64(count) - bl.Mean) / stddev
 		if z > cfg.Anomaly.ZThreshold {
 			excess := cfg.Anomaly.Beta * (z - cfg.Anomaly.ZThreshold)
-			// anomaly 점수 상한: 이벤트당 최대 50점
-			excess = math.Min(excess, 50)
-			if ruleMsgIDs[msgID] {
-				anomalyScore += excess
-			} else {
-				log.Printf("[ANOMALY-INFO] %s: %s 급증 (count=%d mean=%.1f z=%.1f)", userID, msgID, count, bl.Mean, z)
+			// anomaly 상한 적용 (0이면 무제한)
+			if cfg.Anomaly.MaxPerEvent > 0 {
+				excess = math.Min(excess, cfg.Anomaly.MaxPerEvent)
 			}
+			anomalyScore += excess
 		}
 	}
 
@@ -891,7 +918,7 @@ func calculateStateScore(userID string, state *UserState) {
 	state.RuleScores = ruleScores
 	state.AnomalyScore = math.Round(anomalyScore*100) / 100
 
-	// Cold Start: baseline 데이터 부족 시 점수=0 (reference 동일)
+	// Cold Start
 	if isColdStart(userID, state, cfg) {
 		state.ColdStart = true
 		state.RiskScore = 0
@@ -899,7 +926,7 @@ func calculateStateScore(userID string, state *UserState) {
 	}
 	state.ColdStart = false
 
-	// Decay: λ^days (weekend_mode=skip 시 주말 제외)
+	// Decay
 	days := state.DaysSinceLast
 	if days < 1 {
 		days = 1
@@ -907,8 +934,22 @@ func calculateStateScore(userID string, state *UserState) {
 	days = effectiveDays(days, cfg.Decay.WeekendMode)
 	decayed := state.PrevScore * math.Pow(cfg.Decay.Lambda, float64(days))
 	
-	// ruleScore에 이미 상황가중치 적용됨
+	// floorScore: 블랙리스트 유저 최소 점수
+	if cfg.FloorScore.Enabled && getEffectiveContext(userProfiles[userID]) == "blacklist" {
+		if decayed < cfg.FloorScore.Default {
+			decayed = cfg.FloorScore.Default
+		}
+	}
+	
 	state.RiskScore = math.Round((decayed+ruleScore+anomalyScore)*100) / 100
+}
+
+// isWhitelisted는 유저가 화이트리스트인지 확인
+func isWhitelisted(userID string) bool {
+	userProfilesMu.RLock()
+	profile := userProfiles[userID]
+	userProfilesMu.RUnlock()
+	return profile != nil && profile.Whitelisted
 }
 
 // getContextMultiplier는 유저의 상황가중치를 반환한다.
@@ -2163,11 +2204,12 @@ func loadUserProfiles() {
 		Hits struct {
 			Hits []struct {
 				Source struct {
-					UserID    string `json:"userId"`
-					Context   string `json:"context"`
-					StartDate string `json:"startDate"`
-					EndDate   string `json:"endDate"`
-					Note      string `json:"note"`
+					UserID      string `json:"userId"`
+					Context     string `json:"context"`
+					StartDate   string `json:"startDate"`
+					EndDate     string `json:"endDate"`
+					Note        string `json:"note"`
+					Whitelisted bool   `json:"whitelisted"`
 				} `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
@@ -2178,10 +2220,11 @@ func loadUserProfiles() {
 	for _, h := range result.Hits.Hits {
 		if h.Source.UserID != "" {
 			newProfiles[h.Source.UserID] = &UserProfile{
-				Context:   h.Source.Context,
-				StartDate: h.Source.StartDate,
-				EndDate:   h.Source.EndDate,
-				Note:      h.Source.Note,
+				Context:     h.Source.Context,
+				StartDate:   h.Source.StartDate,
+				EndDate:     h.Source.EndDate,
+				Note:        h.Source.Note,
+				Whitelisted: h.Source.Whitelisted,
 			}
 		}
 	}
@@ -2196,13 +2239,14 @@ func SetUserProfile(userID string, profile *UserProfile) error {
 		profile.Context = "normal"
 	}
 	doc := map[string]interface{}{
-		"type":      "profile",
-		"userId":    userID,
-		"context":   profile.Context,
-		"startDate": profile.StartDate,
-		"endDate":   profile.EndDate,
-		"note":      profile.Note,
-		"updatedAt": time.Now().In(loc).Format(time.RFC3339),
+		"type":        "profile",
+		"userId":      userID,
+		"context":     profile.Context,
+		"startDate":   profile.StartDate,
+		"endDate":     profile.EndDate,
+		"note":        profile.Note,
+		"whitelisted": profile.Whitelisted,
+		"updatedAt":   time.Now().In(loc).Format(time.RFC3339),
 	}
 	body, _ := json.Marshal(doc)
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("%s/%s/_doc/%s_profile", opensearchURL, common.BaselinesIndex(indexPrefix), userID), bytes.NewReader(body))
