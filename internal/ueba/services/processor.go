@@ -1199,8 +1199,9 @@ func checkDateRollover() {
 	}
 	log.Printf("[ROLLOVER] 날짜 변경: %s → %s", currentDate, today)
 
-	// 롤오버 전 현재 점수 저장 (어제 날짜 인덱스에)
-	saveScoresBatchForDate(strings.ReplaceAll(currentDate, "-", "."))
+	// 롤오버 전 현재 점수 저장 (어제 날짜 인덱스에, 어제 23:59:59 타임스탬프로)
+	yesterdayEnd := currentDate + "T23:59:59+09:00"
+	saveScoresBatchForDate(strings.ReplaceAll(currentDate, "-", "."), yesterdayEnd)
 
 	currentDate = today
 	userStatesMu.Lock()
@@ -1503,14 +1504,19 @@ func calcMeanStddev(values []float64) (float64, float64) {
 // ===== 점수 저장 (10분 배치) =====
 
 func saveScoresBatch() {
-	saveScoresBatchForDate(time.Now().In(loc).Format("2006.01.02"))
+	saveScoresBatchForDate(time.Now().In(loc).Format("2006.01.02"), "")
 }
 
-func saveScoresBatchForDate(day string) {
+func saveScoresBatchForDate(day string, overrideTimestamp string) {
 	userStatesMu.Lock()
 	var bulkBody bytes.Buffer
 	cfg := loadConfig()
 	count := 0
+
+	timestamp := overrideTimestamp
+	if timestamp == "" {
+		timestamp = time.Now().In(loc).Format(time.RFC3339)
+	}
 
 	for userID, state := range userStates {
 		if !state.Dirty {
@@ -1535,7 +1541,7 @@ func saveScoresBatchForDate(day string) {
 			PrevScore:    state.PrevScore,
 			EventCounts:  state.EventCounts,
 			EventValues:  state.EventValues,
-			Timestamp:    time.Now().In(loc).Format(time.RFC3339),
+			Timestamp:    timestamp,
 		}
 		bulkBody.WriteString(fmt.Sprintf(`{"index":{"_index":"%s","_id":"%s_%s"}}`, common.DailyScoresIndex(indexPrefix, day), userID, time.Now().In(loc).Format("15")))
 		bulkBody.WriteString("\n")
