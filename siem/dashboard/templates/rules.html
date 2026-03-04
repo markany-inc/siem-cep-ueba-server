@@ -127,6 +127,22 @@
     </main>
 
     <!-- 마이그레이션 모달 -->
+    <!-- JSON 뷰어 모달 -->
+    <div id="jsonViewerModal" class="modal">
+        <div class="modal-content" style="width:80vw;max-width:1000px;height:80vh;display:flex;flex-direction:column;padding:0;">
+            <div class="flex items-center justify-between px-5 py-3 border-b bg-slate-50">
+                <h3 class="text-lg font-semibold">📄 저장된 필드 메타데이터 JSON</h3>
+                <button onclick="closeJsonViewer()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div class="flex-1 overflow-auto p-4">
+                <pre id="jsonViewerContent" class="text-sm bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto h-full"></pre>
+            </div>
+            <div class="border-t px-5 py-3 flex justify-end bg-gray-50">
+                <button onclick="copyJsonToClipboard()" class="btn btn-secondary text-sm">📋 복사</button>
+            </div>
+        </div>
+    </div>
+
     <div id="migrationModal" class="modal">
         <div class="modal-content" style="width:98vw;max-width:1600px;height:95vh;display:flex;flex-direction:column;padding:0;">
             <div class="flex items-center justify-between px-5 py-3 border-b bg-slate-50">
@@ -163,7 +179,10 @@
                     </div>
                     <div class="border-t px-5 py-3 flex justify-between bg-gray-50">
                         <button onclick="resetMigration()" class="btn text-sm" style="background:#ef4444;color:white;border:none">🗑 초기화</button>
-                        <button onclick="saveMigration()" class="btn btn-primary text-sm">💾 메타데이터 저장</button>
+                        <div class="flex gap-2">
+                            <button onclick="viewSavedJson()" class="btn btn-secondary text-sm">📄 저장된 JSON 보기</button>
+                            <button onclick="saveMigration()" class="btn btn-primary text-sm">💾 메타데이터 저장</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1429,6 +1448,26 @@
 
         function closeMigration() {
             document.getElementById('migrationModal').classList.remove('show');
+        }
+
+        async function viewSavedJson() {
+            try {
+                const r = await fetch('/api/cep/field-meta');
+                const data = await r.json();
+                document.getElementById('jsonViewerContent').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('jsonViewerModal').classList.add('show');
+            } catch (e) {
+                alert('JSON 로드 실패: ' + e.message);
+            }
+        }
+
+        function closeJsonViewer() {
+            document.getElementById('jsonViewerModal').classList.remove('show');
+        }
+
+        function copyJsonToClipboard() {
+            const text = document.getElementById('jsonViewerContent').textContent;
+            navigator.clipboard.writeText(text).then(() => alert('복사되었습니다'));
         }
 
         // 상위 마이그레이션: N일치 이벤트 분석
