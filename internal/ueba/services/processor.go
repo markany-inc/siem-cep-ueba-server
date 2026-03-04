@@ -1205,7 +1205,7 @@ func checkDateRollover() {
 
 	currentDate = today
 	userStatesMu.Lock()
-	for _, state := range userStates {
+	for userID, state := range userStates {
 		state.PrevScore = state.RiskScore
 		state.DaysSinceLast = 1
 		state.RuleScore = 0
@@ -1214,8 +1214,13 @@ func checkDateRollover() {
 		state.EventCounts = make(map[string]int)
 		state.EventValues = make(map[string]float64)
 		state.Dirty = true
+		// decay 적용된 새 점수 계산
+		calculateStateScore(userID, state)
 	}
 	userStatesMu.Unlock()
+
+	// 롤오버 후 모든 유저의 decay된 점수 즉시 저장
+	saveScoresBatch()
 
 	go func() {
 		updateBaselines()
