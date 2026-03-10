@@ -169,27 +169,39 @@ async def dashboard(request: Request):
             "byRule": {"terms": {"field": "ruleName.keyword", "size": 10}}
         }
     })
-    # 사용자별 오늘 기록으로 레벨별 카운트
-    ueba = await es_query(IDX_SCORES, {
-        "size": 0,
-        "query": {"range": {"@timestamp": {"gte": "now/d", "time_zone": "Asia/Seoul"}}},
-        "aggs": {
-            "byUser": {
-                "terms": {"field": "userId.keyword", "size": 500, "order": {"maxScore": "desc"}},
-                "aggs": {
-                    "maxScore": {"max": {"field": "riskScore"}},
-                    "recent": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": ["userId", "riskScore", "riskLevel", "prevScore", "status", "@timestamp"]}}
-                }
-            }
-        }
-    })
-    # 사용자별 최신 riskLevel로 카운트
+    # UEBA API에서 실시간 사용자 데이터 조회
     level_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-    for bucket in ueba.get("aggregations", {}).get("byUser", {}).get("buckets", []):
-        hits = bucket.get("recent", {}).get("hits", {}).get("hits", [])
-        if hits:
-            level = hits[0]["_source"].get("riskLevel", "LOW")
-            level_counts[level] = level_counts.get(level, 0) + 1
+    top_users = []
+    ueba_last_update = ""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{UEBA_URL}/api/users", timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                profiles = await get_user_profiles()
+                multipliers = (await get_ueba_config()).get("multipliers", {})
+                for u in data.get("users", []):
+                    level = u.get("riskLevel", "LOW")
+                    level_counts[level] = level_counts.get(level, 0) + 1
+                    profile = profiles.get(u.get("userId", ""), {})
+                    ctx = profile.get("effectiveContext", "") if isinstance(profile, dict) else ""
+                    top_users.append({
+                        "userId": u.get("userId"),
+                        "riskScore": u.get("riskScore", 0),
+                        "riskLevel": level,
+                        "prevScore": u.get("prevScore", 0),
+                        "scoreDiff": u.get("riskScore", 0) - u.get("prevScore", 0),
+                        "status": u.get("status", "active"),
+                        "context": ctx,
+                        "contextName": multipliers.get(ctx, {}).get("name", "") if ctx else "",
+                        "@timestamp": u.get("lastUpdated", "")
+                    })
+                    if not ueba_last_update and u.get("lastUpdated"):
+                        ueba_last_update = utc_to_kst(u["lastUpdated"])
+                top_users = sorted(top_users, key=lambda x: x.get("riskScore", 0), reverse=True)[:10]
+    except:
+        pass
+    
     recent_alerts = await es_query(IDX_ALERTS, {
         "size": 10, "sort": [{"@timestamp": "desc"}],
         "_source": ["ruleId", "ruleName", "severity", "userId", "userName", "hostname", "@timestamp", "description"]
@@ -200,32 +212,9 @@ async def dashboard(request: Request):
         "query": {"range": {"@timestamp": {"gte": "now/d", "time_zone": "Asia/Seoul"}}},
         "aggs": {"byType": {"terms": {"field": "msgId.keyword", "size": 20}}}
     })
-    # top 10 사용자 + 점수 변화 계산
-    yesterday = await get_yesterday_scores()
-    profiles = await get_user_profiles()
-    multipliers = (await get_ueba_config()).get("multipliers", {})
-    top_users = []
-    ueba_last_update = ""
-    for bucket in ueba.get("aggregations", {}).get("byUser", {}).get("buckets", []):
-        hits = bucket.get("recent", {}).get("hits", {}).get("hits", [])
-        if hits:
-            current = hits[0]["_source"]
-            if not ueba_last_update and current.get("@timestamp"):
-                ueba_last_update = utc_to_kst(current["@timestamp"])
-            # 어제 최종 점수와 비교
-            prev_score = yesterday.get(current.get("userId", ""), current["riskScore"])
-            current["scoreDiff"] = current["riskScore"] - prev_score
-            # 상황가중치 정보 추가
-            profile = profiles.get(current.get("userId", ""), {})
-            ctx = profile.get("effectiveContext", "") if isinstance(profile, dict) else ""
-            current["context"] = ctx
-            current["contextName"] = multipliers.get(ctx, {}).get("name", "") if ctx else ""
-            top_users.append(current)
-    # 점수 내림차순 정렬 후 상위 10명
-    top_users = sorted(top_users, key=lambda x: x.get("riskScore", 0), reverse=True)[:10]
     config = await get_ueba_config()
     return templates.TemplateResponse("index.html", {
-        "request": request, "alerts": alerts, "ueba": ueba,
+        "request": request, "alerts": alerts, "ueba": {},
         "recent_alerts": recent_alerts.get("hits", {}).get("hits", []),
         "top_users": top_users, "level_counts": level_counts,
         "logs": logs, "now": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -235,39 +224,31 @@ async def dashboard(request: Request):
 
 @app.get("/users", response_class=HTMLResponse)
 async def users(request: Request, level: str = None):
-    # 사용자별 최근 2개 기록 조회
-    body = {
-        "size": 0,
-        "aggs": {
-            "byUser": {
-                "terms": {"field": "userId.keyword", "size": 200},
-                "aggs": {
-                    "recent": {
-                        "top_hits": {
-                            "size": 1, "sort": [{"@timestamp": "desc"}],
-                            "_source": ["userId", "userName", "riskScore", "riskLevel", "prevScore", "status", "eventValues", "ruleScores", "@timestamp"]
-                        }
-                    }
-                }
-            }
-        }
-    }
-    result = await es_query(IDX_SCORES, body)
-    yesterday = await get_yesterday_scores()
+    # UEBA API에서 실시간 데이터 조회
     users_list = []
-    for bucket in result.get("aggregations", {}).get("byUser", {}).get("buckets", []):
-        hits = bucket["recent"]["hits"]["hits"]
-        if hits:
-            user = hits[0]
-            curr = user["_source"]["riskScore"]
-            prev = yesterday.get(user["_source"].get("userId", ""), curr)
-            user["_source"]["scoreDiff"] = curr - prev
-            if level:
-                if level == "HIGH" and user["_source"]["riskLevel"] not in ["HIGH"]:
-                    continue
-                elif level != "HIGH" and user["_source"]["riskLevel"] != level:
-                    continue
-            users_list.append(user)
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{UEBA_URL}/api/users", timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                for u in data.get("users", []):
+                    if level:
+                        if level == "HIGH" and u.get("riskLevel") != "HIGH":
+                            continue
+                        elif level != "HIGH" and u.get("riskLevel") != level:
+                            continue
+                    users_list.append({"_source": {
+                        "userId": u.get("userId"),
+                        "riskScore": u.get("riskScore", 0),
+                        "riskLevel": u.get("riskLevel", "LOW"),
+                        "prevScore": u.get("prevScore", 0),
+                        "ruleScore": u.get("ruleScore", 0),
+                        "scoreDiff": u.get("riskScore", 0) - u.get("prevScore", 0),
+                        "status": u.get("status", "active"),
+                        "@timestamp": u.get("lastUpdated", "")
+                    }})
+    except:
+        pass
     users_list.sort(key=lambda x: x["_source"]["riskScore"], reverse=True)
     config = await get_ueba_config()
     return templates.TemplateResponse("users.html", {"request": request, "users": users_list, "level": level, "tiers": config.get("tiers", {})})
@@ -292,10 +273,17 @@ async def update_user_context(user_id: str, request: Request):
 @app.get("/user/{user_id}", response_class=HTMLResponse)
 async def user_detail(request: Request, user_id: str):
     today_filter = {"range": {"@timestamp": {"gte": "now/d", "time_zone": "Asia/Seoul"}}}
-    ueba = await es_query(IDX_SCORES, {
-        "size": 10, "sort": [{"@timestamp": "desc"}],
-        "query": {"bool": {"must": [{"term": {"userId": user_id}}, today_filter]}}
-    })
+    
+    # UEBA API에서 실시간 데이터 조회
+    realtime_user = {}
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{UEBA_URL}/api/users/{user_id}", timeout=5)
+            if r.status_code == 200:
+                realtime_user = r.json()
+    except:
+        pass
+    
     alerts = await es_query(IDX_ALERTS, {
         "size": 50, "sort": [{"@timestamp": "desc"}],
         "query": {"bool": {"must": [{"term": {"userId": user_id}}, today_filter]}}
@@ -304,61 +292,42 @@ async def user_detail(request: Request, user_id: str):
         "size": 50, "sort": [{"@timestamp": "desc"}],
         "query": {"bool": {"should": [{"term": {"userId": user_id}}, {"term": {"cefExtensions.suid": user_id}}], "minimum_should_match": 1, "filter": [today_filter]}}
     })
-    # 오늘 전체 규칙 위반 집계
-    today_agg = await es_query(IDX_SCORES, {
-        "size": 0,
-        "query": {"bool": {"must": [{"term": {"userId": user_id}}, {"range": {"@timestamp": {"gte": "now/d", "time_zone": "Asia/Seoul"}}}]}},
-        "aggs": {
-            "max_rule": {"max": {"field": "ruleScore"}},
-            "max_anomaly": {"max": {"field": "anomalyScore"}},
-            "max_decay": {"max": {"field": "decayedPrev"}}
-        }
-    })
-    today_violations = await es_query(IDX_SCORES, {
-        "size": 100, "_source": ["ruleScores"],
-        "query": {"bool": {"must": [{"term": {"userId": user_id}}, {"range": {"@timestamp": {"gte": "now/d", "time_zone": "Asia/Seoul"}}}, {"exists": {"field": "ruleScores"}}]}}
-    })
-    # 오늘 발생한 모든 규칙 위반 합산
-    today_rule_scores = {}
-    for h in today_violations.get("hits", {}).get("hits", []):
-        for rule, score in h["_source"].get("ruleScores", {}).items():
-            if rule not in today_rule_scores or score > today_rule_scores[rule]:
-                today_rule_scores[rule] = score
-    aggs = today_agg.get("aggregations", {})
+    
+    # 실시간 데이터에서 today_summary 구성
     today_summary = {
-        "ruleScore": aggs.get("max_rule", {}).get("value", 0) or 0,
-        "anomalyScore": aggs.get("max_anomaly", {}).get("value", 0) or 0,
-        "decayedPrev": aggs.get("max_decay", {}).get("value", 0) or 0,
-        "ruleViolations": list(today_rule_scores.keys()),
-        "ruleScores": today_rule_scores
+        "ruleScore": realtime_user.get("ruleScore", 0),
+        "anomalyScore": realtime_user.get("anomalyScore", 0),
+        "decayedPrev": realtime_user.get("prevScore", 0) * 0.9,
+        "ruleViolations": list(realtime_user.get("ruleScores", {}).keys()),
+        "ruleScores": realtime_user.get("ruleScores", {})
     }
-    # 이전 대비 행동지표 변화 계산 (eventValues 기반)
+    
+    # 실시간 eventValues로 행동지표 표시
     feature_changes = []
-    hits = ueba.get("hits", {}).get("hits", [])
-    if len(hits) >= 2:
-        curr = hits[0]["_source"].get("eventValues", {}) or {}
-        prev = hits[1]["_source"].get("eventValues", {}) or {}
-        all_keys = set(list(curr.keys()) + list(prev.keys()))
-        for k in sorted(all_keys):
-            cv = curr.get(k, 0) or 0
-            pv = prev.get(k, 0) or 0
-            diff = cv - pv
-            if diff != 0:
-                feature_changes.append({"name": k, "diff": diff})
+    for k, v in sorted(realtime_user.get("eventValues", {}).items()):
+        if v and v > 0:
+            feature_changes.append({"name": k, "diff": v})
+    
     config = await get_ueba_config()
-    # 어제 최종 점수 조회 (전일대비 정확한 계산용)
-    yesterday_score = await es_query(IDX_SCORES, {
-        "size": 1, "sort": [{"@timestamp": "desc"}],
-        "query": {"bool": {"must": [
-            {"term": {"userId": user_id}},
-            {"range": {"@timestamp": {"gte": "now-1d/d", "lt": "now/d", "time_zone": "Asia/Seoul"}}}
-        ]}},
-        "_source": ["riskScore"]
-    })
-    prev_day_score = 0
-    yh = yesterday_score.get("hits", {}).get("hits", [])
-    if yh:
-        prev_day_score = yh[0]["_source"].get("riskScore", 0) or 0
+    prev_day_score = realtime_user.get("prevScore", 0)
+    
+    # ueba hits 구성 (템플릿 호환)
+    decayed = realtime_user.get("prevScore", 0) * 0.9
+    hits = []
+    if realtime_user:
+        hits = [{"_source": {
+            "userId": user_id,
+            "riskScore": realtime_user.get("riskScore", 0),
+            "riskLevel": realtime_user.get("riskLevel", "LOW"),
+            "ruleScore": realtime_user.get("ruleScore", 0),
+            "anomalyScore": realtime_user.get("anomalyScore", 0),
+            "prevScore": realtime_user.get("prevScore", 0),
+            "decayedPrev": decayed,
+            "eventValues": realtime_user.get("eventValues", {}),
+            "ruleScores": realtime_user.get("ruleScores", {}),
+            "@timestamp": realtime_user.get("lastUpdated", "")
+        }}]
+    
     return templates.TemplateResponse("user_detail.html", {
         "request": request, "user_id": user_id,
         "ueba": hits, "alerts": alerts.get("hits", {}).get("hits", []),
