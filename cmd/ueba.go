@@ -6,7 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/markany/safepc-siem/config"
-	_ "github.com/markany/safepc-siem/docs"
+	_ "github.com/markany/safepc-siem/docs/ueba"
 	"github.com/markany/safepc-siem/internal/common"
 	"github.com/markany/safepc-siem/internal/ueba/controllers"
 	"github.com/markany/safepc-siem/internal/ueba/services"
@@ -29,6 +29,7 @@ var uebaCmd = &cobra.Command{
 		common.InitTimezone(cfg.Timezone)
 
 		fieldMetaCtrl := common.NewFieldMetaController(osClient, cfg.IndexPrefix)
+		logCtrl := common.NewLogController(osClient, cfg.IndexPrefix)
 		ruleCtrl := controllers.NewRuleController()
 		statusCtrl := controllers.NewStatusController()
 		userCtrl := controllers.NewUserController()
@@ -43,6 +44,11 @@ var uebaCmd = &cobra.Command{
 		e.PUT("/api/field-meta", fieldMetaCtrl.Put)
 		e.POST("/api/field-meta/analyze", fieldMetaCtrl.Analyze)
 		e.POST("/api/field-meta/analyze-field", fieldMetaCtrl.AnalyzeField)
+
+		// 로그 조회 API
+		e.GET("/api/logs", logCtrl.Search)
+		e.POST("/api/logs/aggregate", logCtrl.Aggregate)
+		e.GET("/api/logs/migration-meta", logCtrl.MigrationMeta)
 
 		// UEBA 규칙 API
 		e.GET("/api/rules", ruleCtrl.List)
@@ -72,7 +78,7 @@ var uebaCmd = &cobra.Command{
 		e.PUT("/api/users/:id/context", userCtrl.SetContext)
 
 		// Swagger
-		e.GET("/swagger/*", echoSwagger.WrapHandler)
+		e.GET("/swagger/*", echoSwagger.EchoWrapHandler(echoSwagger.InstanceName("ueba")))
 
 		// UEBA 전체 로직 시작
 		go services.StartProcessor(cfg)

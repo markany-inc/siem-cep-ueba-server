@@ -7,7 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/markany/safepc-siem/config"
-	_ "github.com/markany/safepc-siem/docs"
+	_ "github.com/markany/safepc-siem/docs/cep"
 	"github.com/markany/safepc-siem/internal/cep/controllers"
 	"github.com/markany/safepc-siem/internal/cep/services"
 	"github.com/markany/safepc-siem/internal/common"
@@ -39,6 +39,7 @@ var cepCmd = &cobra.Command{
 		)
 
 		fieldMetaCtrl := common.NewFieldMetaController(os, cfg.IndexPrefix)
+		logCtrl := common.NewLogController(os, cfg.IndexPrefix)
 		ruleCtrl := controllers.NewRuleController(os, flink, cfg.IndexPrefix)
 		jobCtrl := controllers.NewJobController(flink, os, cfg.IndexPrefix)
 		alertCtrl := controllers.NewAlertController(os, cfg.IndexPrefix)
@@ -54,9 +55,15 @@ var cepCmd = &cobra.Command{
 		e.POST("/api/field-meta/analyze", fieldMetaCtrl.Analyze)
 		e.POST("/api/field-meta/analyze-field", fieldMetaCtrl.AnalyzeField)
 
+		// 로그 조회 API
+		e.GET("/api/logs", logCtrl.Search)
+		e.POST("/api/logs/aggregate", logCtrl.Aggregate)
+		e.GET("/api/logs/migration-meta", logCtrl.MigrationMeta)
+
 		// CEP 규칙 API
 		e.GET("/api/rules", ruleCtrl.List)
 		e.POST("/api/rules", ruleCtrl.Create)
+		e.POST("/api/rules/validate", ruleCtrl.Validate)
 		e.PUT("/api/rules/:id", ruleCtrl.Update)
 		e.DELETE("/api/rules/:id", ruleCtrl.Delete)
 		e.POST("/api/build-sql", ruleCtrl.BuildSQL)
@@ -70,7 +77,7 @@ var cepCmd = &cobra.Command{
 		e.GET("/api/alerts", alertCtrl.List)
 
 		// Swagger
-		e.GET("/swagger/*", echoSwagger.WrapHandler)
+		e.GET("/swagger/*", echoSwagger.EchoWrapHandler(echoSwagger.InstanceName("cep")))
 
 		// 초기 로드 (백그라운드)
 		go func() {

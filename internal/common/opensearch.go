@@ -152,3 +152,20 @@ func (c *OSClient) GetMapping(index string) (map[string]interface{}, error) {
 	json.NewDecoder(resp.Body).Decode(&result)
 	return result, nil
 }
+
+func (c *OSClient) Get(index, docID string) (map[string]interface{}, error) {
+	resp, err := Client.Get(fmt.Sprintf("%s/%s/_doc/%s", c.BaseURL, index, docID))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("not found")
+	}
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if source, ok := result["_source"].(map[string]interface{}); ok {
+		return source, nil
+	}
+	return nil, fmt.Errorf("invalid response")
+}

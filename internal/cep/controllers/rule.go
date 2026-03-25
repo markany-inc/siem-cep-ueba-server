@@ -130,3 +130,28 @@ func (c *RuleController) Delete(ctx echo.Context) error {
 	}
 	return ctx.JSON(200, map[string]string{"status": "ok"})
 }
+
+func (c *RuleController) Validate(ctx echo.Context) error {
+	var rule map[string]interface{}
+	if err := ctx.Bind(&rule); err != nil {
+		return ctx.JSON(400, map[string]interface{}{"valid": false, "errors": []string{"invalid JSON"}})
+	}
+
+	var errors []string
+	if _, ok := rule["name"].(string); !ok {
+		errors = append(errors, "name 필드 필수")
+	}
+	if _, ok := rule["match"].(map[string]interface{}); !ok {
+		errors = append(errors, "match 필드 필수")
+	}
+
+	sql := services.BuildSQLFromRule(rule)
+	if sql == "" {
+		errors = append(errors, "SQL 생성 실패: match 조건 확인 필요")
+	}
+
+	if len(errors) > 0 {
+		return ctx.JSON(400, map[string]interface{}{"valid": false, "errors": errors})
+	}
+	return ctx.JSON(200, map[string]interface{}{"valid": true, "sql": sql})
+}
