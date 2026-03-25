@@ -165,13 +165,14 @@ const docTemplate = `{
 }`
 
 var SwaggerInfo = &swag.Spec{
-	Version:     "1.0.0",
-	Title:       "SafePC SIEM API",
-	Description: "CEP + UEBA API",
-	BasePath:    "/api",
-	SwaggerTemplate: docTemplate,
+	Version:          "1.0.0",
+	Title:            "SafePC SIEM API",
+	Description:      "CEP + UEBA API",
+	BasePath:         "/api",
+	InfoInstanceName: "swagger",
+	SwaggerTemplate:  docTemplate,
 }
 
 func init() {
-	swag.Register(SwaggerInfo.InstanceName(), SwaggerInfo)
+	swag.Register(SwaggerInfo.InfoInstanceName, SwaggerInfo)
 }
