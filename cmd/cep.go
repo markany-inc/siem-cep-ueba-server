@@ -7,10 +7,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/markany/safepc-siem/config"
+	_ "github.com/markany/safepc-siem/docs"
 	"github.com/markany/safepc-siem/internal/cep/controllers"
 	"github.com/markany/safepc-siem/internal/cep/services"
 	"github.com/markany/safepc-siem/internal/common"
 	"github.com/spf13/cobra"
+	echoSwagger "github.com/swaggo/echo-swagger"
 )
 
 var cepCmd = &cobra.Command{
@@ -66,6 +68,9 @@ var cepCmd = &cobra.Command{
 
 		// CEP Alert API
 		e.GET("/api/alerts", alertCtrl.List)
+
+		// Swagger
+		e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 		// 초기 로드 (백그라운드)
 		go func() {

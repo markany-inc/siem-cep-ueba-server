@@ -6,10 +6,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/markany/safepc-siem/config"
+	_ "github.com/markany/safepc-siem/docs"
 	"github.com/markany/safepc-siem/internal/common"
 	"github.com/markany/safepc-siem/internal/ueba/controllers"
 	"github.com/markany/safepc-siem/internal/ueba/services"
 	"github.com/spf13/cobra"
+	echoSwagger "github.com/swaggo/echo-swagger"
 )
 
 var uebaCmd = &cobra.Command{
@@ -68,6 +70,9 @@ var uebaCmd = &cobra.Command{
 		e.GET("/api/users/:id/hourly", userCtrl.Hourly)
 		e.GET("/api/users/:id/context", userCtrl.GetContext)
 		e.PUT("/api/users/:id/context", userCtrl.SetContext)
+
+		// Swagger
+		e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 		// UEBA 전체 로직 시작
 		go services.StartProcessor(cfg)
