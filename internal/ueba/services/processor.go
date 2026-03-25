@@ -353,13 +353,22 @@ func recoverTodayState() {
 
 	rules := loadRules()
 
-	// 2) 룰별 OpenSearch aggregation으로 유저별 집계값 조회
+	// 2) 룰별 OpenSearch aggregation으로 유저별 집계값 조회 (병렬 처리)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5) // 동시 5개 제한 (OpenSearch 부하 방지)
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
 		}
-		recoverRuleAgg(rule, today)
+		wg.Add(1)
+		go func(r Rule) {
+			defer wg.Done()
+			sem <- struct{}{}
+			recoverRuleAgg(r, today)
+			<-sem
+		}(rule)
 	}
+	wg.Wait()
 
 	// 3) anomaly용: msgId별 유저별 이벤트 카운트 (baseline 비교용)
 	recoverEventCounts(today)
