@@ -6,7 +6,7 @@ const uebaDocTemplate = `{
     "swagger": "2.0",
     "info": {
         "title": "SafePC UEBA API",
-        "description": "User Entity Behavior Analytics - 사용자 행동 기반 위험 점수 분석",
+        "description": "User Entity Behavior Analytics - 사용자 행동 기반 위험 점수 분석\n\n## 점수 계산\nRiskScore = DecayedPrev + RuleScore + AnomalyScore\n- RuleScore: weight × ln(1 + count)\n- AnomalyScore: β × (Z-Score - threshold)",
         "version": "1.0.0"
     },
     "host": "203.229.154.49:48082",
@@ -24,19 +24,14 @@ const uebaDocTemplate = `{
             "get": {
                 "tags": ["Users"],
                 "summary": "사용자 위험 점수 목록",
-                "responses": {
-                    "200": {"description": "사용자 목록", "schema": {"$ref": "#/definitions/UserListResponse"}}
-                }
+                "responses": {"200": {"description": "사용자 목록", "schema": {"$ref": "#/definitions/UserListResponse"}}}
             }
         },
         "/users/scores": {
             "get": {
                 "tags": ["Users"],
                 "summary": "점수 테이블 (DataTables 형식)",
-                "description": "DataTables 호환 형식으로 사용자 점수 반환",
-                "responses": {
-                    "200": {"description": "점수 목록", "schema": {"$ref": "#/definitions/ScoresDataTable"}}
-                }
+                "responses": {"200": {"description": "점수 목록", "schema": {"$ref": "#/definitions/ScoresDataTable"}}}
             }
         },
         "/users/{id}": {
@@ -44,20 +39,26 @@ const uebaDocTemplate = `{
                 "tags": ["Users"],
                 "summary": "사용자 상세 정보",
                 "parameters": [{"in": "path", "name": "id", "type": "string", "required": true}],
-                "responses": {
-                    "200": {"description": "사용자 상세", "schema": {"$ref": "#/definitions/UserDetail"}}
-                }
+                "responses": {"200": {"description": "사용자 상세", "schema": {"$ref": "#/definitions/UserDetail"}}}
             }
         },
         "/users/{id}/history": {
             "get": {
                 "tags": ["Users"],
-                "summary": "점수 이력",
+                "summary": "일별 점수 이력",
                 "parameters": [
                     {"in": "path", "name": "id", "type": "string", "required": true},
                     {"in": "query", "name": "days", "type": "integer", "default": 7}
                 ],
                 "responses": {"200": {"description": "점수 이력"}}
+            }
+        },
+        "/users/{id}/hourly": {
+            "get": {
+                "tags": ["Users"],
+                "summary": "시간별 이벤트 분포",
+                "parameters": [{"in": "path", "name": "id", "type": "string", "required": true}],
+                "responses": {"200": {"description": "시간별 분포"}}
             }
         },
         "/users/{id}/context": {
@@ -70,6 +71,7 @@ const uebaDocTemplate = `{
             "put": {
                 "tags": ["Users"],
                 "summary": "사용자 컨텍스트 설정",
+                "description": "퇴사예정, 휴가 등 상황 설정 (점수 가중치 적용)",
                 "parameters": [
                     {"in": "path", "name": "id", "type": "string", "required": true},
                     {"in": "body", "name": "body", "schema": {"$ref": "#/definitions/UserContextInput"}}
@@ -120,13 +122,13 @@ const uebaDocTemplate = `{
                 "tags": ["Logs"],
                 "summary": "로그 검색 (페이지네이션)",
                 "parameters": [
-                    {"in": "query", "name": "from", "type": "string", "description": "시작일 YYYY-MM-DD"},
-                    {"in": "query", "name": "to", "type": "string", "description": "종료일"},
+                    {"in": "query", "name": "from", "type": "string"},
+                    {"in": "query", "name": "to", "type": "string"},
                     {"in": "query", "name": "userId", "type": "string"},
                     {"in": "query", "name": "msgId", "type": "string"},
                     {"in": "query", "name": "hostname", "type": "string"},
-                    {"in": "query", "name": "size", "type": "integer", "default": 100, "description": "페이지 크기 (최대 1000)"},
-                    {"in": "query", "name": "offset", "type": "integer", "default": 0, "description": "시작 위치 (최대 10000)"}
+                    {"in": "query", "name": "size", "type": "integer", "default": 100},
+                    {"in": "query", "name": "offset", "type": "integer", "default": 0}
                 ],
                 "responses": {"200": {"description": "로그 목록", "schema": {"$ref": "#/definitions/LogSearchResponse"}}}
             }
@@ -136,14 +138,14 @@ const uebaDocTemplate = `{
                 "tags": ["Logs"],
                 "summary": "로그 집계",
                 "parameters": [{"in": "body", "name": "body", "schema": {"$ref": "#/definitions/LogAggRequest"}}],
-                "responses": {"200": {"description": "집계 결과", "schema": {"$ref": "#/definitions/LogAggResponse"}}}
+                "responses": {"200": {"description": "집계 결과"}}
             }
         },
         "/logs/migration-meta": {
             "get": {
                 "tags": ["Logs"],
                 "summary": "규칙 생성용 메타",
-                "responses": {"200": {"description": "메타 정보", "schema": {"$ref": "#/definitions/MigrationMeta"}}}
+                "responses": {"200": {"description": "메타 정보"}}
             }
         },
         "/health": {
@@ -167,15 +169,22 @@ const uebaDocTemplate = `{
                 "responses": {"200": {"description": "설정", "schema": {"$ref": "#/definitions/UEBAConfig"}}}
             }
         },
+        "/settings": {
+            "get": {"tags": ["Settings"], "summary": "전체 설정 조회", "responses": {"200": {"description": "설정"}}},
+            "put": {"tags": ["Settings"], "summary": "설정 저장", "responses": {"200": {"description": "저장 완료"}}}
+        },
         "/field-meta": {
             "get": {"tags": ["Field Meta"], "summary": "필드 메타 조회", "responses": {"200": {"description": "필드 메타"}}},
             "put": {"tags": ["Field Meta"], "summary": "필드 메타 저장", "responses": {"200": {"description": "저장 완료"}}}
+        },
+        "/field-meta/analyze": {
+            "post": {"tags": ["Field Meta"], "summary": "이벤트별 필드 분석", "responses": {"200": {"description": "분석 결과"}}}
         }
     },
     "definitions": {
         "UserListResponse": {
             "type": "object",
-            "example": {"users": [{"userId": "hslee", "riskScore": 12.5, "riskLevel": "MEDIUM", "ruleScore": 8.0, "anomalyScore": 4.5}]}
+            "example": {"users": [{"userId": "hslee", "riskScore": 315.73, "riskLevel": "HIGH", "ruleScore": 280.0, "anomalyScore": 35.73}]}
         },
         "ScoresDataTable": {
             "type": "object",
@@ -184,7 +193,17 @@ const uebaDocTemplate = `{
         },
         "UserDetail": {
             "type": "object",
-            "example": {"userId": "hslee", "riskScore": 315.73, "riskLevel": "HIGH", "ruleScore": 280.0, "ruleScores": {"CAPTURE_BLOCK": 180.0}, "anomalyScore": 35.73, "eventCounts": {"MESSAGE_CAPTURE_BLOCK": 30}}
+            "example": {
+                "userId": "hslee",
+                "riskScore": 315.73,
+                "riskLevel": "HIGH",
+                "ruleScore": 280.0,
+                "ruleScores": {"USB_BLOCK": 180.0, "CAPTURE_BLOCK": 100.0},
+                "anomalyScore": 35.73,
+                "eventCounts": {"MESSAGE_DEVICE_USAGE": 45, "MESSAGE_CAPTURE_BLOCK": 30},
+                "coldStart": false,
+                "daysSinceLast": 0
+            }
         },
         "UserContext": {
             "type": "object",
@@ -192,18 +211,70 @@ const uebaDocTemplate = `{
         },
         "UserContextInput": {
             "type": "object",
-            "example": {"context": "departing", "startDate": "2026-03-20", "endDate": "2026-04-30", "note": "4월말 퇴사"},
             "properties": {
                 "context": {"type": "string", "enum": ["normal", "departing", "vacation", "blacklist", "probation", "contractor", "vip"]},
-                "startDate": {"type": "string"},
-                "endDate": {"type": "string"},
+                "startDate": {"type": "string", "format": "date"},
+                "endDate": {"type": "string", "format": "date"},
                 "note": {"type": "string"}
-            }
+            },
+            "example": {"context": "departing", "startDate": "2026-03-20", "endDate": "2026-04-30", "note": "4월말 퇴사 예정"}
         },
         "UEBARuleInput": {
             "type": "object",
+            "description": "UEBA 규칙 생성/수정 요청",
             "required": ["name", "weight", "match"],
-            "example": {"name": "화면 캡처 차단", "weight": 6, "enabled": true, "match": {"msgId": "MESSAGE_CAPTURE_BLOCK"}, "ueba": {"enabled": true}}
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string", "description": "카테고리 (매체제어, 정보유출 등)"},
+                "weight": {"type": "number", "description": "점수 가중치 (1-100)"},
+                "enabled": {"type": "boolean", "default": true},
+                "match": {"$ref": "#/definitions/MatchCondition"},
+                "aggregate": {"$ref": "#/definitions/UEBAAggregateCondition"},
+                "ueba": {"type": "object", "properties": {"enabled": {"type": "boolean", "default": true}}}
+            },
+            "example": {
+                "name": "USB 차단",
+                "category": "매체제어",
+                "weight": 10,
+                "enabled": true,
+                "match": {
+                    "msgId": "MESSAGE_DEVICE_USAGE",
+                    "logic": "and",
+                    "conditions": [
+                        {"field": "outcome", "op": "eq", "value": "blocked"}
+                    ]
+                },
+                "aggregate": {"type": "count"},
+                "ueba": {"enabled": true}
+            }
+        },
+        "MatchCondition": {
+            "type": "object",
+            "properties": {
+                "msgId": {"type": "string"},
+                "logic": {"type": "string", "enum": ["and", "or"], "default": "and"},
+                "conditions": {"type": "array", "items": {"$ref": "#/definitions/Condition"}}
+            }
+        },
+        "Condition": {
+            "type": "object",
+            "properties": {
+                "field": {"type": "string"},
+                "op": {"type": "string", "enum": ["eq", "neq", "gt", "gte", "lt", "lte", "in", "contains", "time_range"]},
+                "value": {},
+                "start": {"type": "integer"},
+                "end": {"type": "integer"}
+            },
+            "example": {"field": "outcome", "op": "eq", "value": "blocked"}
+        },
+        "UEBAAggregateCondition": {
+            "type": "object",
+            "description": "집계 타입",
+            "properties": {
+                "type": {"type": "string", "enum": ["count", "sum", "cardinality"], "description": "count: 횟수, sum: 필드합산, cardinality: 고유값수"},
+                "field": {"type": "string", "description": "sum/cardinality 시 대상 필드"}
+            },
+            "example": {"type": "count"}
         },
         "ValidateResponse": {
             "type": "object",
@@ -211,27 +282,42 @@ const uebaDocTemplate = `{
         },
         "LogSearchResponse": {
             "type": "object",
-            "example": {"total": 15000, "size": 100, "offset": 0, "logs": [{"@timestamp": "2026-03-25T10:00:00", "msgId": "MESSAGE_DEVICE_USAGE", "userId": "hslee"}]}
+            "example": {"total": 15000, "size": 100, "offset": 0, "logs": []}
         },
         "LogAggRequest": {
             "type": "object",
             "example": {"from": "2026-03-18", "to": "2026-03-25", "groupBy": "msgId"}
         },
-        "LogAggResponse": {
-            "type": "object",
-            "example": {"groupBy": "msgId", "items": [{"key": "MESSAGE_DEVICE_USAGE", "count": 1523}]}
-        },
-        "MigrationMeta": {
-            "type": "object",
-            "example": {"events": {}, "operators": ["eq", "neq", "gt", "gte", "lt", "lte", "in", "like", "regex", "exists"], "logicOps": ["and", "or"], "aggregates": {"functions": ["count", "sum", "avg"], "windows": ["1m", "5m", "1h"]}, "ruleTemplate": {"name": "", "match": {"msgId": "", "logic": "and", "conditions": []}}}
-        },
         "HealthResponse": {
             "type": "object",
-            "example": {"status": "healthy", "uptime": "1h30m", "memory": {"alloc_mb": 45.2, "sys_mb": 120.5}, "data": {"users": 31, "baselines": 395, "rules": 10, "today_events": 11718}}
+            "example": {
+                "status": "healthy",
+                "uptime": "1h30m",
+                "memory": {"alloc_mb": 45.2, "sys_mb": 120.5, "goroutines": 18},
+                "data": {"users": 31, "baselines": 395, "rules": 10, "today_events": 11718}
+            }
         },
         "UEBAConfig": {
             "type": "object",
-            "example": {"anomaly": {"z_threshold": 2.0, "beta": 0.3, "cold_start_min_days": 6, "baseline_window_days": 30}, "decay": {"lambda": 0.1}, "tiers": {"green_max": 10, "yellow_max": 30}, "multipliers": {"departing": 1.5, "blacklist": 2.0}}
+            "description": "UEBA 설정",
+            "example": {
+                "anomaly": {
+                    "z_threshold": 2.0,
+                    "beta": 10,
+                    "sigma_floor": 0.5,
+                    "cold_start_min_days": 7,
+                    "baseline_window_days": 30,
+                    "frequency_function": "log"
+                },
+                "decay": {
+                    "lambda": 0.9,
+                    "weekend_mode": "skip"
+                },
+                "tiers": {
+                    "green_max": 40,
+                    "yellow_max": 99
+                }
+            }
         }
     }
 }`
