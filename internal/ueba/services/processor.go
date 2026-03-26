@@ -147,11 +147,23 @@ type RuleCondition struct {
 }
 
 // RuleAggregate: 룰이 매칭된 이벤트에서 무엇을 집계할지 정의
-// Type: "count" (기본, 매칭 횟수) / "sum" (필드값 합산) / "cardinality" (고유값 수)
+// Function/Type: "count" (기본, 매칭 횟수) / "sum" (필드값 합산) / "cardinality" (고유값 수)
 // Field: sum/cardinality 시 대상 CEF 필드명 (예: "fsize", "shost")
 type RuleAggregate struct {
-	Type  string `json:"type"`
-	Field string `json:"field"`
+	Function string `json:"function"` // 신규: function 우선
+	Type     string `json:"type"`     // 하위호환: type도 지원
+	Field    string `json:"field"`
+}
+
+// GetFunction: function 또는 type 반환 (function 우선)
+func (a RuleAggregate) GetFunction() string {
+	if a.Function != "" {
+		return a.Function
+	}
+	if a.Type != "" {
+		return a.Type
+	}
+	return "count"
 }
 
 type RuleUEBA struct {
@@ -394,7 +406,7 @@ func recoverRuleAgg(rule Rule, today string) {
 	queryPart := esQuery["query"]
 
 	var subAggs map[string]interface{}
-	switch rule.Aggregate.Type {
+	switch rule.Aggregate.GetFunction() {
 	case "sum":
 		if rule.Aggregate.Field == "" {
 			return
@@ -416,7 +428,7 @@ func recoverRuleAgg(rule Rule, today string) {
 		func(uid string, bucket map[string]interface{}) {
 			userStatesMu.Lock()
 			state := getOrCreateState(uid)
-			switch rule.Aggregate.Type {
+			switch rule.Aggregate.GetFunction() {
 			case "sum", "cardinality":
 				if val, ok := bucket["val"].(map[string]interface{}); ok {
 					state.EventValues[rule.Name] = toFloat64(val["value"])
@@ -789,7 +801,7 @@ func processEvent(data []byte) {
 		matched = true
 		ruleKey := rule.Name
 
-		switch rule.Aggregate.Type {
+		switch rule.Aggregate.GetFunction() {
 		case "sum":
 			val := toFloat64(getFieldValue(event, rule.Aggregate.Field))
 			state.EventValues[ruleKey] += val
@@ -1943,13 +1955,17 @@ func validateRule(data map[string]interface{}) []string {
 		}
 	}
 	if agg, ok := data["aggregate"].(map[string]interface{}); ok {
-		t, _ := agg["type"].(string)
-		if t != "" && t != "count" && t != "sum" && t != "cardinality" {
-			errs = append(errs, fmt.Sprintf("aggregate.type '%s' 잘못됨 (count/sum/cardinality)", t))
+		// function 또는 type 지원
+		fn, _ := agg["function"].(string)
+		if fn == "" {
+			fn, _ = agg["type"].(string)
 		}
-		if t == "sum" || t == "cardinality" {
+		if fn != "" && fn != "count" && fn != "sum" && fn != "cardinality" && fn != "count_distinct" {
+			errs = append(errs, fmt.Sprintf("aggregate.function '%s' 잘못됨 (count/sum/cardinality/count_distinct)", fn))
+		}
+		if fn == "sum" || fn == "cardinality" || fn == "count_distinct" {
 			if f, _ := agg["field"].(string); f == "" {
-				errs = append(errs, fmt.Sprintf("aggregate.type=%s 시 field 필수", t))
+				errs = append(errs, fmt.Sprintf("aggregate.function=%s 시 field 필수", fn))
 			}
 		}
 	}

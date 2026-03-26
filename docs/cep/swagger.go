@@ -233,12 +233,14 @@ const cepDocTemplate = `{
         },
         "AggregateCondition": {
             "type": "object",
-            "description": "집계 조건 (N회 이상 탐지용)",
+            "description": "집계 조건",
             "properties": {
-                "count": {"type": "object", "properties": {"min": {"type": "integer"}}},
+                "function": {"type": "string", "enum": ["count", "sum", "count_distinct"], "description": "집계 함수"},
+                "field": {"type": "string", "description": "집계 대상 필드 (sum, count_distinct 시)"},
+                "min": {"type": "integer", "description": "최소 임계값 (이상)"},
                 "within": {"type": "string", "description": "시간 윈도우 (예: 10m, 1h)"}
             },
-            "example": {"count": {"min": 5}, "within": "10m"}
+            "example": {"function": "count", "min": 5, "within": "10m"}
         },
         "PatternItem": {
             "type": "object",

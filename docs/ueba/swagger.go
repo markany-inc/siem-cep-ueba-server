@@ -271,10 +271,10 @@ const uebaDocTemplate = `{
             "type": "object",
             "description": "집계 타입",
             "properties": {
-                "type": {"type": "string", "enum": ["count", "sum", "cardinality"], "description": "count: 횟수, sum: 필드합산, cardinality: 고유값수"},
+                "function": {"type": "string", "enum": ["count", "sum", "cardinality"], "description": "집계 함수"},
                 "field": {"type": "string", "description": "sum/cardinality 시 대상 필드"}
             },
-            "example": {"type": "count"}
+            "example": {"function": "count"}
         },
         "ValidateResponse": {
             "type": "object",

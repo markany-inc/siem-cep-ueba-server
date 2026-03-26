@@ -250,37 +250,29 @@ CEP와 동일한 Field Meta API를 사용합니다.
 
 UEBA 점수 계산에 사용되는 집계 방식:
 
-| 타입 | 설명 | 점수 계산 |
-|------|------|----------|
-| count | 매칭 횟수 (기본) | weight × ln(1 + count) |
-| sum | 필드값 합산 | weight × ln(1 + sum) |
-| cardinality | 고유값 수 | weight × ln(1 + unique_count) |
-
-JSON 구조:
 ```json
-"aggregate": {
-  "type": "count"
-}
-```
+// 횟수 기반 (기본)
+{"function": "count"}
 
-```json
-"aggregate": {
-  "type": "sum",
-  "field": "fsize"
-}
-```
+// 필드값 합산
+{"function": "sum", "field": "fsize"}
 
-```json
-"aggregate": {
-  "type": "cardinality",
-  "field": "dhost"
-}
+// 고유값 수
+{"function": "cardinality", "field": "dhost"}
 ```
 
 | 필드 | 설명 | 필수 |
 |------|------|------|
-| type | 집계 타입 (count/sum/cardinality) | 예 |
-| field | 집계 대상 필드 (sum, cardinality 시) | type에 따라 |
+| function | 집계 함수 (count/sum/cardinality) | 예 |
+| field | 집계 대상 필드 | sum, cardinality 시 |
+
+점수 계산: `weight × ln(1 + 집계값)`
+
+| function | 집계값 | 예시 |
+|----------|--------|------|
+| count | 매칭 횟수 | USB 차단 3회 → ln(4) = 1.39 |
+| sum | 필드 합계 | 파일 100MB → ln(104857601) = 18.47 |
+| cardinality | 고유값 수 | 호스트 10개 → ln(11) = 2.40 |
 
 ---
 

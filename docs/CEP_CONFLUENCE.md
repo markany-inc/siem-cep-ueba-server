@@ -360,25 +360,25 @@ GET /api/field-meta 응답 (프론트엔드에 전달되는 스키마):
 
 ### 5.3 집계 조건 (aggregate)
 
-집계 패턴에서 사용. 시간 윈도우 내 N회 이상 발생 시 탐지:
+집계 패턴에서 사용. 시간 윈도우 내 조건 만족 시 탐지:
 
 ```json
-"aggregate": {
-  "count": {"min": 5},
-  "within": "10m"
-}
+// 10분 내 5회 이상
+{"function": "count", "min": 5, "within": "10m"}
+
+// 1시간 내 파일 합계 100MB 이상
+{"function": "sum", "field": "fsize", "min": 104857600, "within": "1h"}
+
+// 30분 내 서로 다른 호스트 10개 이상
+{"function": "count_distinct", "field": "dhost", "min": 10, "within": "30m"}
 ```
 
-| 필드 | 설명 | 예시 |
+| 필드 | 설명 | 필수 |
 |------|------|------|
-| count.min | 최소 발생 횟수 | 5 (5회 이상) |
-| within | 시간 윈도우 | "10m" (10분) |
-
-SQL 변환:
-```sql
-GROUP BY TUMBLE(proctime, INTERVAL '10' MINUTE), userId
-HAVING COUNT(*) >= 5
-```
+| function | 집계 함수 (count/sum/count_distinct) | 예 |
+| field | 집계 대상 필드 | sum, count_distinct 시 |
+| min | 최소 임계값 (이상) | 예 |
+| within | 시간 윈도우 (예: 10m, 1h) | 예 |
 
 ### 5.4 순차/분기 패턴 (patterns, paths)
 

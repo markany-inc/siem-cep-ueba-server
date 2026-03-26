@@ -144,6 +144,47 @@ func BuildMatchWhere(match map[string]interface{}) string {
 	return strings.Join(clauses, " AND ")
 }
 
+// ── 집계 SQL 생성 (옵션 A 구조) ──
+// {"function": "count", "min": 5, "within": "10m"}
+// {"function": "sum", "field": "fsize", "min": 104857600, "within": "1h"}
+// {"function": "count_distinct", "field": "dhost", "min": 10, "within": "30m"}
+func buildAggregateSQL(agg map[string]interface{}, where, selectFields, groupFields string) string {
+	fn := toString(agg["function"], "count")
+	field := toString(agg["field"], "")
+	minVal := toInt(agg["min"])
+	if minVal == 0 {
+		// 하위 호환: count.min 구조
+		minVal = getNestedInt(agg, "count", "min", 1)
+	}
+	interval := ParseWindow(getNestedVal(agg, "within", "1h"))
+
+	var aggExpr string
+	switch fn {
+	case "sum":
+		if field == "" {
+			field = "*"
+		}
+		if field != "*" && !isBaseField(field) {
+			field = fmt.Sprintf("CAST(%s AS DOUBLE)", cefField(field))
+		}
+		aggExpr = fmt.Sprintf("SUM(%s)", field)
+	case "count_distinct":
+		if field == "" {
+			return "SELECT * FROM events WHERE 1=0" // field 필수
+		}
+		if !isBaseField(field) {
+			field = cefField(field)
+		}
+		aggExpr = fmt.Sprintf("COUNT(DISTINCT %s)", field)
+	default: // count
+		aggExpr = "COUNT(*)"
+	}
+
+	return fmt.Sprintf(
+		"SELECT %s, %s as cnt FROM events WHERE %s GROUP BY TUMBLE(proctime, %s), %s HAVING %s >= %d",
+		selectFields, aggExpr, where, interval, groupFields, aggExpr, minVal)
+}
+
 // ── 시간 윈도우 → Flink INTERVAL ('5m' → INTERVAL '5' MINUTE) ──
 func ParseWindow(window interface{}) string {
 	s := fmt.Sprintf("%v", window)
@@ -251,13 +292,7 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 
 		// 집계 조건
 		if aggregate != nil {
-			interval := ParseWindow(getNestedVal(aggregate, "within", "1h"))
-			minCount := getNestedInt(aggregate, "count", "min", 1)
-			return fmt.Sprintf(
-				"SELECT %s, COUNT(*) as cnt "+
-					"FROM events WHERE %s "+
-					"GROUP BY TUMBLE(proctime, %s), %s "+
-					"HAVING COUNT(*) >= %d", selectFields, where, interval, groupFields, minCount)
+			return buildAggregateSQL(aggregate, where, selectFields, groupFields)
 		}
 
 		// quantifier 반복 횟수
