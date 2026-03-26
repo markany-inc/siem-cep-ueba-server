@@ -358,6 +358,51 @@ GET /api/field-meta 응답 (프론트엔드에 전달되는 스키마):
 | Nm | 5m | 5분 |
 | Nh | 1h | 1시간 |
 
+### 5.3 집계 조건 (aggregate)
+
+집계 패턴에서 사용. 시간 윈도우 내 N회 이상 발생 시 탐지:
+
+```json
+"aggregate": {
+  "count": {"min": 5},
+  "within": "10m"
+}
+```
+
+| 필드 | 설명 | 예시 |
+|------|------|------|
+| count.min | 최소 발생 횟수 | 5 (5회 이상) |
+| within | 시간 윈도우 | "10m" (10분) |
+
+SQL 변환:
+```sql
+GROUP BY TUMBLE(proctime, INTERVAL '10' MINUTE), userId
+HAVING COUNT(*) >= 5
+```
+
+### 5.4 순차/분기 패턴 (patterns, paths)
+
+순차 패턴에서 사용. 이벤트 발생 순서 지정:
+
+```json
+"patterns": [
+  {"id": "P1", "order": 1, "match": {"msgId": "EVENT_A"}},
+  {"id": "P2", "order": 2, "match": {"msgId": "EVENT_B"}},
+  {"id": "P3", "order": 2, "match": {"msgId": "EVENT_C"}},
+  {"id": "P4", "order": 3, "match": {"msgId": "EVENT_D"}}
+],
+"paths": [["P1", "P2", "P4"], ["P1", "P3", "P4"]],
+"within": "10m"
+```
+
+| 필드 | 설명 |
+|------|------|
+| patterns[].id | 패턴 식별자 (paths에서 참조) |
+| patterns[].order | 단계 순서 (같은 order면 병렬 분기) |
+| patterns[].match | 매칭 조건 (msgId, conditions) |
+| paths | 유효한 경로 목록 (없으면 order 순서대로 선형) |
+| within | 전체 패턴 시간 윈도우 |
+
 ---
 
 ## 6. CEP 규칙 API
