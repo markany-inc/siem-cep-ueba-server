@@ -356,119 +356,123 @@ POST /api/rules
 
 이벤트 발생 횟수 기반 점수:
 
-요청:
 ```json
 {
-  "name": "USB 차단",
+  "name": "USB_차단",
   "category": "매체제어",
   "weight": 10,
   "enabled": true,
   "match": {
     "msgId": "MESSAGE_DEVICE_USAGE",
-    "logic": "and",
     "conditions": [
       {"field": "outcome", "op": "eq", "value": "blocked"}
     ]
   },
   "aggregate": {
-    "type": "count"
-  },
-  "ueba": {
-    "enabled": true
+    "function": "count"
   }
 }
 ```
 
-점수 계산:
-```
-USB 차단 3회 발생 시:
-RuleScore = 10 × ln(1 + 3) = 10 × 1.386 = 13.86
-```
+점수 계산: USB 차단 3회 발생 시 → 10 × ln(1 + 3) = 13.86점
 
 ### 6.3 합산 규칙 (sum)
 
 필드값 합산 기반 점수:
 
-요청:
 ```json
 {
-  "name": "대용량 파일 반출",
+  "name": "대용량_파일반출",
   "category": "정보유출",
   "weight": 5,
   "enabled": true,
   "match": {
-    "msgId": "MESSAGE_FILE_EXPORT",
+    "msgId": "MESSAGE_FILE_TRANSFER",
     "conditions": [
-      {"field": "outcome", "op": "eq", "value": "allowed"}
+      {"field": "act", "op": "eq", "value": "upload"}
     ]
   },
   "aggregate": {
-    "type": "sum",
+    "function": "sum",
     "field": "fsize"
-  },
-  "ueba": {
-    "enabled": true
   }
 }
 ```
 
-점수 계산:
-```
-100MB 파일 반출 시:
-RuleScore = 5 × ln(1 + 104857600) = 5 × 18.47 = 92.35
-```
+점수 계산: 파일 100MB 전송 시 → 5 × ln(1 + 104857600) = 92.4점
 
 ### 6.4 고유값 규칙 (cardinality)
 
 고유값 수 기반 점수:
 
-요청:
 ```json
 {
-  "name": "다수 호스트 접근",
-  "category": "내부이동",
+  "name": "다중호스트_접근",
+  "category": "이상행위",
   "weight": 15,
   "enabled": true,
   "match": {
-    "msgId": "MESSAGE_NETWORK_ACCESS",
-    "conditions": []
+    "msgId": "MESSAGE_NETWORK_ACCESS"
   },
   "aggregate": {
-    "type": "cardinality",
+    "function": "cardinality",
     "field": "dhost"
-  },
-  "ueba": {
-    "enabled": true
   }
 }
 ```
 
-점수 계산:
-```
-10개 호스트 접근 시:
-RuleScore = 15 × ln(1 + 10) = 15 × 2.398 = 35.97
-```
+점수 계산: 서로 다른 호스트 10개 접근 시 → 15 × ln(1 + 10) = 36.0점
 
-### 6.5 시간대 조건
+### 6.5 복합 조건 규칙
 
-업무 외 시간 가중:
+여러 조건을 조합한 규칙:
 
-요청:
 ```json
 {
-  "name": "야간 파일 접근",
-  "category": "이상행위",
+  "name": "야간_민감파일_접근",
+  "category": "정보유출",
   "weight": 20,
   "enabled": true,
   "match": {
     "msgId": "MESSAGE_FILE_ACCESS",
-    "logic": "and",
     "conditions": [
-      {"field": "hour", "op": "time_range", "start": 22, "end": 6}
+      {"field": "hour", "op": "time_range", "start": 22, "end": 6},
+      {"field": "fname", "op": "regex", "value": ".*\\.(xlsx|docx|pdf)$"}
     ]
   },
-  "ueba": {
-    "enabled": true
+  "aggregate": {
+    "function": "sum",
+    "field": "fsize"
+  }
+}
+```
+
+점수 계산: 야간에 민감 파일 50MB 접근 시 → 20 × ln(1 + 52428800) = 355.6점
+
+### 6.6 OR 조건 규칙
+
+여러 이벤트 중 하나라도 매칭 시:
+
+```json
+{
+  "name": "매체_차단_통합",
+  "category": "매체제어",
+  "weight": 8,
+  "enabled": true,
+  "match": {
+    "any": [
+      {
+        "msgId": "MESSAGE_DEVICE_USAGE",
+        "conditions": [{"field": "outcome", "op": "eq", "value": "blocked"}]
+      },
+      {
+        "msgId": "MESSAGE_PRINT_USAGE",
+        "conditions": [{"field": "outcome", "op": "eq", "value": "blocked"}]
+      }
+    ]
+  },
+  "aggregate": {
+    "function": "count"
   }
 }
 ```

@@ -483,10 +483,9 @@ POST /api/rules
 
 조건 매칭 시 즉시 알림:
 
-요청:
 ```json
 {
-  "name": "USB 차단 탐지",
+  "name": "USB_차단_탐지",
   "description": "USB 매체 차단 발생 시 즉시 알림",
   "severity": "medium",
   "enabled": true,
@@ -499,21 +498,13 @@ POST /api/rules
 }
 ```
 
-생성되는 SQL:
-```sql
-SELECT userId, 1 as cnt FROM events 
-WHERE msgId = 'MESSAGE_DEVICE_USAGE' 
-  AND cefExtensions['outcome'] = 'blocked'
-```
-
 ### 6.3 집계 패턴 (N회 이상)
 
 지정 시간 내 N회 이상 발생 시 알림:
 
-요청:
 ```json
 {
-  "name": "로그인 실패 반복",
+  "name": "로그인_실패_반복",
   "description": "10분 내 로그인 실패 5회 이상",
   "severity": "high",
   "enabled": true,
@@ -524,35 +515,27 @@ WHERE msgId = 'MESSAGE_DEVICE_USAGE'
     ]
   },
   "aggregate": {
-    "count": {"min": 5},
+    "function": "count",
+    "min": 5,
     "within": "10m"
-  }
+  },
+  "group_by": ["suser"]
 }
-```
-
-생성되는 SQL:
-```sql
-SELECT userId, COUNT(*) as cnt FROM events 
-WHERE msgId = 'MESSAGE_AGENT_AUTHENTICATION' 
-  AND cefExtensions['outcome'] = 'failure'
-GROUP BY TUMBLE(proctime, INTERVAL '10' MINUTE), userId 
-HAVING COUNT(*) >= 5
 ```
 
 ### 6.4 순차 패턴 (A → B 순서)
 
-이벤트가 특정 순서로 발생 시 탐지 (order 필드로 순서 지정):
+이벤트가 특정 순서로 발생 시 탐지:
 
-요청:
 ```json
 {
-  "name": "로그인 실패 후 성공",
-  "description": "로그인 실패 후 5분 내 성공 시 탐지",
+  "name": "로그인_실패후_성공",
+  "description": "로그인 실패 후 5분 내 성공 시 탐지 (무차별 대입 의심)",
   "severity": "medium",
   "enabled": true,
   "patterns": [
     {
-      "id": "P1",
+      "id": "fail",
       "order": 1,
       "match": {
         "msgId": "MESSAGE_AGENT_AUTHENTICATION",
@@ -562,7 +545,7 @@ HAVING COUNT(*) >= 5
       }
     },
     {
-      "id": "P2",
+      "id": "success",
       "order": 2,
       "match": {
         "msgId": "MESSAGE_AGENT_AUTHENTICATION",
@@ -572,131 +555,86 @@ HAVING COUNT(*) >= 5
       }
     }
   ],
-  "within": "5m"
+  "aggregate": {
+    "within": "5m"
+  },
+  "group_by": ["suser"]
 }
-```
-
-생성되는 SQL:
-```sql
-SELECT * FROM events
-MATCH_RECOGNIZE (
-  PARTITION BY userId
-  ORDER BY proctime
-  MEASURES COUNT(*) AS cnt
-  ONE ROW PER MATCH
-  AFTER MATCH SKIP PAST LAST ROW
-  PATTERN (P1 P2) WITHIN INTERVAL '5' MINUTE
-  DEFINE
-    P1 AS msgId = 'MESSAGE_AGENT_AUTHENTICATION' 
-         AND cefExtensions['outcome'] = 'failure',
-    P2 AS msgId = 'MESSAGE_AGENT_AUTHENTICATION' 
-         AND cefExtensions['outcome'] = 'success'
-)
 ```
 
 ### 6.5 분기 패턴 (A → B|C → D)
 
-병렬 분기 구조 탐지. 같은 order는 병렬 분기를 의미하며, paths로 유효한 경로를 명시:
+병렬 분기 구조 탐지. paths로 유효한 경로를 명시:
 
 ```
 다이어그램:
-    ┌─→ [P2] ─┐
-[P1]─┤        ├─→ [P4]
-    └─→ [P3] ─┘
-
-의미: P1 발생 후, (P2 또는 P3) 발생 후, P4 발생
+    ┌─→ [usb_block] ─┐
+[login_fail]─┤              ├─→ [file_export]
+    └─→ [print_block] ─┘
 ```
 
-요청:
 ```json
 {
-  "name": "로그인 실패 후 우회 시도",
+  "name": "로그인후_우회시도",
   "description": "로그인 실패 후 USB 또는 프린터 차단, 이후 파일 반출 시도",
   "severity": "high",
   "enabled": true,
   "patterns": [
-    {"id": "P1", "order": 1, "match": {"msgId": "MESSAGE_LOGIN_FAIL"}},
-    {"id": "P2", "order": 2, "match": {"msgId": "MESSAGE_USB_BLOCK"}},
-    {"id": "P3", "order": 2, "match": {"msgId": "MESSAGE_PRINT_BLOCK"}},
-    {"id": "P4", "order": 3, "match": {"msgId": "MESSAGE_FILE_EXPORT"}}
+    {
+      "id": "login_fail",
+      "order": 1,
+      "match": {"msgId": "MESSAGE_LOGIN_FAIL"}
+    },
+    {
+      "id": "usb_block",
+      "order": 2,
+      "match": {"msgId": "MESSAGE_USB_BLOCK"}
+    },
+    {
+      "id": "print_block",
+      "order": 2,
+      "match": {"msgId": "MESSAGE_PRINT_BLOCK"}
+    },
+    {
+      "id": "file_export",
+      "order": 3,
+      "match": {"msgId": "MESSAGE_FILE_EXPORT"}
+    }
   ],
   "paths": [
-    ["P1", "P2", "P4"],
-    ["P1", "P3", "P4"]
+    ["login_fail", "usb_block", "file_export"],
+    ["login_fail", "print_block", "file_export"]
   ],
-  "within": "10m"
+  "aggregate": {
+    "within": "10m"
+  },
+  "group_by": ["suser"]
 }
-```
-
-- `id`: 패턴 식별자 (paths에서 참조)
-- `order`: 단계 순서 (같은 order면 병렬 분기)
-- `paths`: 유효한 경로 목록 (없으면 order 순서대로 선형 처리)
-
-생성되는 SQL:
-```sql
-SELECT * FROM events
-MATCH_RECOGNIZE (
-  PARTITION BY userId
-  ORDER BY proctime
-  MEASURES COUNT(*) AS cnt
-  ONE ROW PER MATCH
-  AFTER MATCH SKIP PAST LAST ROW
-  PATTERN (P1 P2 P4) WITHIN INTERVAL '10' MINUTE
-  DEFINE
-    P1 AS msgId = 'MESSAGE_LOGIN_FAIL',
-    P2 AS msgId = 'MESSAGE_USB_BLOCK',
-    P4 AS msgId = 'MESSAGE_FILE_EXPORT'
-)
-UNION ALL
-SELECT * FROM events
-MATCH_RECOGNIZE (
-  PARTITION BY userId
-  ORDER BY proctime
-  MEASURES COUNT(*) AS cnt
-  ONE ROW PER MATCH
-  AFTER MATCH SKIP PAST LAST ROW
-  PATTERN (P1 P3 P4) WITHIN INTERVAL '10' MINUTE
-  DEFINE
-    P1 AS msgId = 'MESSAGE_LOGIN_FAIL',
-    P3 AS msgId = 'MESSAGE_PRINT_BLOCK',
-    P4 AS msgId = 'MESSAGE_FILE_EXPORT'
-)
 ```
 
 ### 6.6 동시 패턴 (OR 조건)
 
 여러 이벤트 중 하나라도 발생 시 탐지:
 
-요청:
 ```json
 {
-  "name": "매체 차단 통합",
+  "name": "매체_차단_통합",
   "description": "USB 또는 프린터 차단 발생",
   "severity": "medium",
   "enabled": true,
-  "logic": "OR",
-  "patterns": [
-    {
-      "match": {
+  "match": {
+    "any": [
+      {
         "msgId": "MESSAGE_DEVICE_USAGE",
         "conditions": [{"field": "outcome", "op": "eq", "value": "blocked"}]
-      }
-    },
-    {
-      "match": {
+      },
+      {
         "msgId": "MESSAGE_PRINT_USAGE",
         "conditions": [{"field": "outcome", "op": "eq", "value": "blocked"}]
       }
-    }
-  ]
+    ]
+  }
 }
-```
-
-생성되는 SQL:
-```sql
-SELECT userId, 1 as cnt FROM events 
-WHERE (msgId = 'MESSAGE_DEVICE_USAGE' AND cefExtensions['outcome'] = 'blocked') 
-   OR (msgId = 'MESSAGE_PRINT_USAGE' AND cefExtensions['outcome'] = 'blocked')
 ```
 
 ---
