@@ -193,7 +193,8 @@ const cepDocTemplate = `{
                 "enabled": {"type": "boolean", "default": true},
                 "match": {"$ref": "#/definitions/MatchCondition"},
                 "aggregate": {"$ref": "#/definitions/AggregateCondition"},
-                "patterns": {"type": "array", "items": {"$ref": "#/definitions/PatternItem"}, "description": "순차 패턴용"},
+                "patterns": {"type": "array", "items": {"$ref": "#/definitions/PatternItem"}, "description": "순차/분기 패턴용"},
+                "paths": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "분기 경로 (없으면 order 순서대로 선형)"},
                 "logic": {"type": "string", "enum": ["AND", "OR"], "description": "다중 패턴 결합 방식"},
                 "within": {"type": "string", "description": "순차 패턴 시간 윈도우"}
             },
@@ -241,12 +242,29 @@ const cepDocTemplate = `{
         },
         "PatternItem": {
             "type": "object",
-            "description": "순차 패턴 항목",
+            "description": "순차/분기 패턴 항목",
             "properties": {
-                "order": {"type": "integer", "description": "순서 (1, 2, 3...)"},
-                "match": {"$ref": "#/definitions/MatchCondition"}
+                "id": {"type": "string", "description": "패턴 ID (paths에서 참조용)"},
+                "order": {"type": "integer", "description": "순서 (같은 order면 병렬 분기)"},
+                "match": {"$ref": "#/definitions/MatchCondition"},
+                "quantifier": {"type": "object", "properties": {"min": {"type": "integer"}, "max": {"type": "integer"}}, "description": "반복 횟수"}
             },
-            "example": {"order": 1, "match": {"msgId": "MESSAGE_AGENT_AUTHENTICATION", "conditions": [{"field": "outcome", "op": "eq", "value": "failure"}]}}
+            "example": {"id": "P1", "order": 1, "match": {"msgId": "MESSAGE_LOGIN_FAIL", "conditions": [{"field": "outcome", "op": "eq", "value": "failure"}]}}
+        },
+        "BranchPatternExample": {
+            "type": "object",
+            "description": "분기 패턴 예제: 1→(2 or 3)→4",
+            "example": {
+                "name": "분기 패턴",
+                "within": "10m",
+                "patterns": [
+                    {"id": "P1", "order": 1, "match": {"msgId": "MESSAGE_LOGIN_FAIL"}},
+                    {"id": "P2", "order": 2, "match": {"msgId": "MESSAGE_USB_BLOCK"}},
+                    {"id": "P3", "order": 2, "match": {"msgId": "MESSAGE_PRINT_BLOCK"}},
+                    {"id": "P4", "order": 3, "match": {"msgId": "MESSAGE_FILE_EXPORT"}}
+                ],
+                "paths": [["P1", "P2", "P4"], ["P1", "P3", "P4"]]
+            }
         },
         "RuleCreateResponse": {
             "type": "object",

@@ -99,3 +99,27 @@ func addSpaces(s string) string {
 	}
 	return string(result)
 }
+
+
+// paths 배열 파싱: [["P1","P2","P4"], ["P1","P3","P4"]]
+func toPathsSlice(v interface{}) [][]string {
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([][]string, 0, len(arr))
+	for _, item := range arr {
+		if pathArr, ok := item.([]interface{}); ok {
+			var path []string
+			for _, p := range pathArr {
+				if s, ok := p.(string); ok {
+					path = append(path, s)
+				}
+			}
+			if len(path) > 0 {
+				result = append(result, path)
+			}
+		}
+	}
+	return result
+}

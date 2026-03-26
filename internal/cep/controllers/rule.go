@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -141,13 +142,17 @@ func (c *RuleController) Validate(ctx echo.Context) error {
 	if _, ok := rule["name"].(string); !ok {
 		errors = append(errors, "name 필드 필수")
 	}
-	if _, ok := rule["match"].(map[string]interface{}); !ok {
-		errors = append(errors, "match 필드 필수")
+	
+	// match 또는 patterns 중 하나 필요
+	_, hasMatch := rule["match"].(map[string]interface{})
+	patterns, hasPatterns := rule["patterns"].([]interface{})
+	if !hasMatch && (!hasPatterns || len(patterns) == 0) {
+		errors = append(errors, "match 또는 patterns 필드 필수")
 	}
 
 	sql := services.BuildSQLFromRule(rule)
-	if sql == "" {
-		errors = append(errors, "SQL 생성 실패: match 조건 확인 필요")
+	if sql == "" || strings.Contains(sql, "WHERE 1=0") {
+		errors = append(errors, "SQL 생성 실패: 조건 확인 필요")
 	}
 
 	if len(errors) > 0 {

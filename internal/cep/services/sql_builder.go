@@ -279,61 +279,16 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 
 	// ═══════ 순차 패턴 (MATCH_RECOGNIZE) ═══════
 	if hasOrder {
-		// order 기준 정렬
-		var ordered []map[string]interface{}
-		for _, p := range patterns {
-			if _, ok := p["order"]; ok {
-				ordered = append(ordered, p)
-			}
+		// paths가 있으면 분기 패턴, 없으면 선형 패턴
+		paths := toPathsSlice(rule["paths"])
+		
+		if len(paths) > 0 {
+			// 분기 패턴: paths별로 UNION ALL
+			return buildBranchPattern(patterns, paths, byFields, within)
 		}
-		sort.Slice(ordered, func(i, j int) bool {
-			return toInt(ordered[i]["order"]) < toInt(ordered[j]["order"])
-		})
-
-		var patternParts, defineClauses []string
-		for _, p := range ordered {
-			pid := fmt.Sprintf("P%d", toInt(p["order"]))
-			match := toMap(p["match"])
-			quant := toMap(p["quantifier"])
-			where := BuildMatchWhere(match)
-			defineClauses = append(defineClauses, fmt.Sprintf("%s AS %s", pid, where))
-
-			minQ := toInt(quant["min"])
-			if minQ <= 0 {
-				minQ = 1
-			}
-			maxQ := toInt(quant["max"])
-			if minQ > 1 {
-				if maxQ > 0 {
-					patternParts = append(patternParts, fmt.Sprintf("%s{%d,%d}", pid, minQ, maxQ))
-				} else {
-					patternParts = append(patternParts, fmt.Sprintf("%s{%d,}", pid, minQ))
-				}
-			} else {
-				patternParts = append(patternParts, pid)
-			}
-		}
-
-		partitionBy := strings.Join(byFields, ", ")
-		interval := ParseWindow(within)
-		if within == nil {
-			interval = ParseWindow("5m")
-		}
-
-		return fmt.Sprintf(
-			"SELECT * FROM events\nMATCH_RECOGNIZE (\n"+
-				"  PARTITION BY %s\n"+
-				"  ORDER BY proctime\n"+
-				"  MEASURES\n"+
-				"    COUNT(*) AS cnt\n"+
-				"  ONE ROW PER MATCH\n"+
-				"  AFTER MATCH SKIP PAST LAST ROW\n"+
-				"  PATTERN (%s) WITHIN %s\n"+
-				"  DEFINE\n"+
-				"    %s\n)",
-			partitionBy,
-			strings.Join(patternParts, " "), interval,
-			strings.Join(defineClauses, ", "))
+		
+		// 선형 패턴: order 순서대로
+		return buildSequencePattern(patterns, byFields, within)
 	}
 
 	// ═══════ 동시 패턴 (AND/OR) ═══════
@@ -375,6 +330,129 @@ func BuildSQLFromRule(rule map[string]interface{}) string {
 }
 
 // ── 유틸리티 ──
+
+// 선형 순차 패턴 빌드 (paths 없을 때)
+func buildSequencePattern(patterns []map[string]interface{}, byFields []string, within interface{}) string {
+	// order 기준 정렬
+	var ordered []map[string]interface{}
+	for _, p := range patterns {
+		if _, ok := p["order"]; ok {
+			ordered = append(ordered, p)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return toInt(ordered[i]["order"]) < toInt(ordered[j]["order"])
+	})
+
+	var patternParts, defineClauses []string
+	for _, p := range ordered {
+		pid := getPatternId(p)
+		match := toMap(p["match"])
+		quant := toMap(p["quantifier"])
+		where := BuildMatchWhere(match)
+		defineClauses = append(defineClauses, fmt.Sprintf("%s AS %s", pid, where))
+
+		minQ := toInt(quant["min"])
+		if minQ <= 0 {
+			minQ = 1
+		}
+		maxQ := toInt(quant["max"])
+		if minQ > 1 {
+			if maxQ > 0 {
+				patternParts = append(patternParts, fmt.Sprintf("%s{%d,%d}", pid, minQ, maxQ))
+			} else {
+				patternParts = append(patternParts, fmt.Sprintf("%s{%d,}", pid, minQ))
+			}
+		} else {
+			patternParts = append(patternParts, pid)
+		}
+	}
+
+	return buildMatchRecognize(patternParts, defineClauses, byFields, within)
+}
+
+// 분기 패턴 빌드 (paths 있을 때)
+func buildBranchPattern(patterns []map[string]interface{}, paths [][]string, byFields []string, within interface{}) string {
+	// 패턴 ID → 패턴 맵 생성
+	patternMap := make(map[string]map[string]interface{})
+	for _, p := range patterns {
+		pid := getPatternId(p)
+		patternMap[pid] = p
+	}
+
+	var sqls []string
+	for _, path := range paths {
+		var patternParts, defineClauses []string
+		for _, pid := range path {
+			p, ok := patternMap[pid]
+			if !ok {
+				continue
+			}
+			match := toMap(p["match"])
+			quant := toMap(p["quantifier"])
+			where := BuildMatchWhere(match)
+			defineClauses = append(defineClauses, fmt.Sprintf("%s AS %s", pid, where))
+
+			minQ := toInt(quant["min"])
+			if minQ <= 0 {
+				minQ = 1
+			}
+			maxQ := toInt(quant["max"])
+			if minQ > 1 {
+				if maxQ > 0 {
+					patternParts = append(patternParts, fmt.Sprintf("%s{%d,%d}", pid, minQ, maxQ))
+				} else {
+					patternParts = append(patternParts, fmt.Sprintf("%s{%d,}", pid, minQ))
+				}
+			} else {
+				patternParts = append(patternParts, pid)
+			}
+		}
+		if len(patternParts) > 0 {
+			sqls = append(sqls, buildMatchRecognize(patternParts, defineClauses, byFields, within))
+		}
+	}
+
+	if len(sqls) == 0 {
+		return "SELECT * FROM events WHERE 1=0"
+	}
+	if len(sqls) == 1 {
+		return sqls[0]
+	}
+	return strings.Join(sqls, "\nUNION ALL\n")
+}
+
+// MATCH_RECOGNIZE SQL 생성
+func buildMatchRecognize(patternParts, defineClauses []string, byFields []string, within interface{}) string {
+	partitionBy := strings.Join(byFields, ", ")
+	interval := ParseWindow(within)
+	if within == nil {
+		interval = ParseWindow("5m")
+	}
+
+	return fmt.Sprintf(
+		"SELECT * FROM events\nMATCH_RECOGNIZE (\n"+
+			"  PARTITION BY %s\n"+
+			"  ORDER BY proctime\n"+
+			"  MEASURES\n"+
+			"    COUNT(*) AS cnt\n"+
+			"  ONE ROW PER MATCH\n"+
+			"  AFTER MATCH SKIP PAST LAST ROW\n"+
+			"  PATTERN (%s) WITHIN %s\n"+
+			"  DEFINE\n"+
+			"    %s\n)",
+		partitionBy,
+		strings.Join(patternParts, " "), interval,
+		strings.Join(defineClauses, ", "))
+}
+
+// 패턴 ID 추출 (id 필드 우선, 없으면 P{order})
+func getPatternId(p map[string]interface{}) string {
+	if id, ok := p["id"].(string); ok && id != "" {
+		return id
+	}
+	return fmt.Sprintf("P%d", toInt(p["order"]))
+}
 
 
 
