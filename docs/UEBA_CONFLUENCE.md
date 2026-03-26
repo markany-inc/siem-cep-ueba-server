@@ -248,31 +248,101 @@ CEP와 동일한 Field Meta API를 사용합니다.
 
 ### 5.2 집계 타입 (aggregate)
 
-UEBA 점수 계산에 사용되는 집계 방식:
+UEBA 점수 계산에 사용되는 집계 방식입니다.
 
-```json
-// 횟수 기반 (기본)
-{"function": "count"}
-
-// 필드값 합산
-{"function": "sum", "field": "fsize"}
-
-// 고유값 수
-{"function": "cardinality", "field": "dhost"}
-```
+#### 기본 구조
 
 | 필드 | 설명 | 필수 |
 |------|------|------|
 | function | 집계 함수 (count/sum/cardinality) | 예 |
 | field | 집계 대상 필드 | sum, cardinality 시 |
 
-점수 계산: `weight × ln(1 + 집계값)`
+#### 점수 계산 공식
 
-| function | 집계값 | 예시 |
-|----------|--------|------|
-| count | 매칭 횟수 | USB 차단 3회 → ln(4) = 1.39 |
-| sum | 필드 합계 | 파일 100MB → ln(104857601) = 18.47 |
-| cardinality | 고유값 수 | 호스트 10개 → ln(11) = 2.40 |
+`점수 = weight × ln(1 + 집계값)`
+
+| function | 집계값 | 예시 (weight=10) |
+|----------|--------|------------------|
+| count | 매칭 횟수 | 3회 → 10 × ln(4) = 13.9점 |
+| sum | 필드 합계 | 100MB → 10 × ln(104857601) = 184.7점 |
+| cardinality | 고유값 수 | 10개 호스트 → 10 × ln(11) = 24.0점 |
+
+#### 예제 1: 횟수 기반 (count)
+
+USB 차단 횟수에 따른 위험 점수:
+
+```json
+{
+  "name": "USB차단_점수",
+  "match": {
+    "msgId": "MESSAGE_DEVICE_USAGE",
+    "conditions": [{"field": "outcome", "op": "eq", "value": "blocked"}]
+  },
+  "aggregate": {"function": "count"},
+  "weight": 10
+}
+```
+
+#### 예제 2: 합계 기반 (sum)
+
+파일 전송량에 따른 위험 점수:
+
+```json
+{
+  "name": "파일전송량_점수",
+  "match": {
+    "msgId": "MESSAGE_FILE_TRANSFER",
+    "conditions": [{"field": "act", "op": "eq", "value": "upload"}]
+  },
+  "aggregate": {"function": "sum", "field": "fsize"},
+  "weight": 5
+}
+```
+
+#### 예제 3: 고유값 기반 (cardinality)
+
+접근한 서로 다른 호스트 수에 따른 위험 점수:
+
+```json
+{
+  "name": "다중호스트_접근점수",
+  "match": {"msgId": "MESSAGE_NETWORK_ACCESS"},
+  "aggregate": {"function": "cardinality", "field": "dhost"},
+  "weight": 15
+}
+```
+
+#### 예제 4: 업무시간 외 활동
+
+야간(22시~06시) 파일 접근 점수:
+
+```json
+{
+  "name": "야간_파일접근",
+  "match": {
+    "msgId": "MESSAGE_FILE_ACCESS",
+    "conditions": [{"field": "hour", "op": "time_range", "start": 22, "end": 6}]
+  },
+  "aggregate": {"function": "count"},
+  "weight": 20
+}
+```
+
+#### 예제 5: 민감 파일 접근
+
+특정 확장자 파일 접근 점수:
+
+```json
+{
+  "name": "민감파일_접근",
+  "match": {
+    "msgId": "MESSAGE_FILE_ACCESS",
+    "conditions": [{"field": "fname", "op": "regex", "value": ".*\\.(xlsx|docx|pdf)$"}]
+  },
+  "aggregate": {"function": "sum", "field": "fsize"},
+  "weight": 8
+}
+```
 
 ---
 

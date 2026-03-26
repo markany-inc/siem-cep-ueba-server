@@ -360,18 +360,9 @@ GET /api/field-meta 응답 (프론트엔드에 전달되는 스키마):
 
 ### 5.3 집계 조건 (aggregate)
 
-집계 패턴에서 사용. 시간 윈도우 내 조건 만족 시 탐지:
+시간 윈도우 내 조건 만족 시 탐지합니다.
 
-```json
-// 10분 내 5회 이상
-{"function": "count", "min": 5, "within": "10m"}
-
-// 1시간 내 파일 합계 100MB 이상
-{"function": "sum", "field": "fsize", "min": 104857600, "within": "1h"}
-
-// 30분 내 서로 다른 호스트 10개 이상
-{"function": "count_distinct", "field": "dhost", "min": 10, "within": "30m"}
-```
+#### 기본 구조
 
 | 필드 | 설명 | 필수 |
 |------|------|------|
@@ -379,6 +370,83 @@ GET /api/field-meta 응답 (프론트엔드에 전달되는 스키마):
 | field | 집계 대상 필드 | sum, count_distinct 시 |
 | min | 최소 임계값 (이상) | 예 |
 | within | 시간 윈도우 (예: 10m, 1h) | 예 |
+
+#### 예제 1: 횟수 기반 (count)
+
+10분 내 로그인 실패 5회 이상:
+
+```json
+{
+  "name": "로그인실패_반복",
+  "match": {
+    "msgId": "MESSAGE_AGENT_AUTHENTICATION",
+    "conditions": [{"field": "outcome", "op": "eq", "value": "failure"}]
+  },
+  "aggregate": {"function": "count", "min": 5, "within": "10m"},
+  "group_by": ["suser"]
+}
+```
+
+#### 예제 2: 합계 기반 (sum)
+
+1시간 내 파일 전송량 100MB 이상:
+
+```json
+{
+  "name": "대용량_파일전송",
+  "match": {
+    "msgId": "MESSAGE_FILE_TRANSFER",
+    "conditions": [{"field": "act", "op": "eq", "value": "upload"}]
+  },
+  "aggregate": {"function": "sum", "field": "fsize", "min": 104857600, "within": "1h"},
+  "group_by": ["suser"]
+}
+```
+
+#### 예제 3: 고유값 기반 (count_distinct)
+
+30분 내 서로 다른 호스트 10개 이상 접근:
+
+```json
+{
+  "name": "다중호스트_접근",
+  "match": {"msgId": "MESSAGE_NETWORK_ACCESS"},
+  "aggregate": {"function": "count_distinct", "field": "dhost", "min": 10, "within": "30m"},
+  "group_by": ["suser"]
+}
+```
+
+#### 예제 4: 순차 패턴 + 집계 (patterns + aggregate)
+
+로그인 후 10분 내 프린트 3회 이상:
+
+```json
+{
+  "name": "로그인후_프린트반복",
+  "patterns": [
+    {"id": "login", "order": 1, "match": {"msgId": "MESSAGE_LOGIN"}},
+    {"id": "print", "order": 2, "match": {"msgId": "MESSAGE_PRINT"}, "quantifier": {"min": 3}}
+  ],
+  "aggregate": {"within": "10m"},
+  "group_by": ["suser"]
+}
+```
+
+#### 예제 5: 순차 패턴 + 합계 조건
+
+로그인 후 30분 내 파일 복사 총 50MB 이상:
+
+```json
+{
+  "name": "로그인후_대량복사",
+  "patterns": [
+    {"id": "login", "order": 1, "match": {"msgId": "MESSAGE_LOGIN"}},
+    {"id": "copy", "order": 2, "match": {"msgId": "MESSAGE_FILE_COPY"}}
+  ],
+  "aggregate": {"function": "sum", "field": "fsize", "min": 52428800, "within": "30m"},
+  "group_by": ["suser"]
+}
+```
 
 ### 5.4 순차/분기 패턴 (patterns, paths)
 
