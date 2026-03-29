@@ -450,26 +450,76 @@ GET /api/field-meta 응답 (프론트엔드에 전달되는 스키마):
 
 ### 5.4 순차/분기 패턴 (patterns, paths)
 
-순차 패턴에서 사용. 이벤트 발생 순서 지정:
+이벤트 발생 순서를 지정하여 탐지합니다.
+
+#### 순차 패턴 예제
+
+로그인 실패 후 5분 내 성공:
 
 ```json
-"patterns": [
-  {"id": "P1", "order": 1, "match": {"msgId": "EVENT_A"}},
-  {"id": "P2", "order": 2, "match": {"msgId": "EVENT_B"}},
-  {"id": "P3", "order": 2, "match": {"msgId": "EVENT_C"}},
-  {"id": "P4", "order": 3, "match": {"msgId": "EVENT_D"}}
-],
-"paths": [["P1", "P2", "P4"], ["P1", "P3", "P4"]],
-"within": "10m"
+{
+  "name": "로그인_실패후_성공",
+  "description": "로그인 실패 후 5분 내 성공 (무차별 대입 의심)",
+  "severity": "medium",
+  "enabled": true,
+  "patterns": [
+    {
+      "id": "fail",
+      "order": 1,
+      "match": {
+        "msgId": "MESSAGE_AGENT_AUTHENTICATION",
+        "conditions": [{"field": "outcome", "op": "eq", "value": "failure"}]
+      }
+    },
+    {
+      "id": "success",
+      "order": 2,
+      "match": {
+        "msgId": "MESSAGE_AGENT_AUTHENTICATION",
+        "conditions": [{"field": "outcome", "op": "eq", "value": "success"}]
+      }
+    }
+  ],
+  "aggregate": {"within": "5m"},
+  "group_by": ["suser"]
+}
 ```
+
+#### 분기 패턴 예제
+
+로그인 실패 → (USB 또는 프린터 차단) → 파일 반출:
+
+```json
+{
+  "name": "로그인후_우회시도",
+  "description": "로그인 실패 후 매체 차단, 이후 파일 반출 시도",
+  "severity": "high",
+  "enabled": true,
+  "patterns": [
+    {"id": "login_fail", "order": 1, "match": {"msgId": "MESSAGE_LOGIN_FAIL"}},
+    {"id": "usb_block", "order": 2, "match": {"msgId": "MESSAGE_USB_BLOCK"}},
+    {"id": "print_block", "order": 2, "match": {"msgId": "MESSAGE_PRINT_BLOCK"}},
+    {"id": "file_export", "order": 3, "match": {"msgId": "MESSAGE_FILE_EXPORT"}}
+  ],
+  "paths": [
+    ["login_fail", "usb_block", "file_export"],
+    ["login_fail", "print_block", "file_export"]
+  ],
+  "aggregate": {"within": "10m"},
+  "group_by": ["suser"]
+}
+```
+
+#### 필드 설명
 
 | 필드 | 설명 |
 |------|------|
 | patterns[].id | 패턴 식별자 (paths에서 참조) |
 | patterns[].order | 단계 순서 (같은 order면 병렬 분기) |
 | patterns[].match | 매칭 조건 (msgId, conditions) |
+| patterns[].quantifier | 반복 횟수 (예: {"min": 3} = 3회 이상) |
 | paths | 유효한 경로 목록 (없으면 order 순서대로 선형) |
-| within | 전체 패턴 시간 윈도우 |
+| aggregate.within | 전체 패턴 시간 윈도우 |
 
 ---
 
