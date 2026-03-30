@@ -185,31 +185,27 @@ const cepDocTemplate = `{
         },
         "CEPRuleInput": {
             "type": "object",
-            "description": "CEP 규칙 생성/수정 요청",
-            "properties": {
-                "name": {"type": "string", "description": "규칙 이름"},
-                "description": {"type": "string", "description": "규칙 설명"},
-                "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"], "description": "심각도"},
-                "enabled": {"type": "boolean", "default": true},
-                "match": {"$ref": "#/definitions/MatchCondition"},
-                "aggregate": {"$ref": "#/definitions/AggregateCondition"},
-                "patterns": {"type": "array", "items": {"$ref": "#/definitions/PatternItem"}, "description": "순차/분기 패턴용"},
-                "paths": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "분기 경로 (없으면 order 순서대로 선형)"},
-                "logic": {"type": "string", "enum": ["AND", "OR"], "description": "다중 패턴 결합 방식"},
-                "within": {"type": "string", "description": "순차 패턴 시간 윈도우"}
-            },
-            "example": {
-                "name": "USB 차단 탐지",
-                "description": "USB 매체 차단 발생 시 즉시 알림",
-                "severity": "medium",
-                "enabled": true,
-                "match": {
-                    "msgId": "MESSAGE_DEVICE_USAGE",
-                    "conditions": [
-                        {"field": "outcome", "op": "eq", "value": "blocked"}
-                    ]
-                }
-            }
+            "description": "CEP 규칙 생성/수정 요청"
+        },
+        "CEPRule_단일패턴": {
+            "type": "object",
+            "description": "단일 패턴: 조건 매칭 시 즉시 탐지",
+            "example": {"name": "USB_차단_탐지", "description": "USB 매체 차단 발생 시 즉시 알림", "severity": "medium", "enabled": true, "match": {"msgId": "MESSAGE_DEVICE_USAGE", "conditions": [{"field": "outcome", "op": "eq", "value": "blocked"}]}}
+        },
+        "CEPRule_집계패턴": {
+            "type": "object",
+            "description": "집계 패턴: 시간 윈도우 내 N회 이상 발생 시 탐지",
+            "example": {"name": "로그인_실패_반복", "description": "10분 내 로그인 실패 5회 이상", "severity": "high", "enabled": true, "match": {"msgId": "MESSAGE_AGENT_AUTHENTICATION", "conditions": [{"field": "outcome", "op": "eq", "value": "failure"}]}, "aggregate": {"function": "count", "min": 5, "within": "10m"}, "group_by": ["suser"]}
+        },
+        "CEPRule_순차패턴": {
+            "type": "object",
+            "description": "순차 패턴: A → B 순서로 발생 시 탐지",
+            "example": {"name": "로그인_실패후_성공", "description": "로그인 실패 후 5분 내 성공", "severity": "medium", "enabled": true, "patterns": [{"id": "fail", "order": 1, "match": {"msgId": "MESSAGE_AGENT_AUTHENTICATION", "conditions": [{"field": "outcome", "op": "eq", "value": "failure"}]}}, {"id": "success", "order": 2, "match": {"msgId": "MESSAGE_AGENT_AUTHENTICATION", "conditions": [{"field": "outcome", "op": "eq", "value": "success"}]}}], "aggregate": {"within": "5m"}, "group_by": ["suser"]}
+        },
+        "CEPRule_분기패턴": {
+            "type": "object",
+            "description": "분기 패턴: A → (B or C) → D 순서로 발생 시 탐지",
+            "example": {"name": "로그인후_우회시도", "description": "로그인 실패 후 USB/프린터 차단, 이후 파일 반출", "severity": "high", "enabled": true, "patterns": [{"id": "login_fail", "order": 1, "match": {"msgId": "MESSAGE_LOGIN_FAIL"}}, {"id": "usb_block", "order": 2, "match": {"msgId": "MESSAGE_USB_BLOCK"}}, {"id": "print_block", "order": 2, "match": {"msgId": "MESSAGE_PRINT_BLOCK"}}, {"id": "file_export", "order": 3, "match": {"msgId": "MESSAGE_FILE_EXPORT"}}], "paths": [["login_fail", "usb_block", "file_export"], ["login_fail", "print_block", "file_export"]], "aggregate": {"within": "10m"}, "group_by": ["suser"]}
         },
         "MatchCondition": {
             "type": "object",

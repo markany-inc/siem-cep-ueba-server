@@ -221,32 +221,27 @@ const uebaDocTemplate = `{
         },
         "UEBARuleInput": {
             "type": "object",
-            "description": "UEBA 규칙 생성/수정 요청",
-            "required": ["name", "weight", "match"],
-            "properties": {
-                "name": {"type": "string"},
-                "category": {"type": "string", "description": "카테고리 (매체제어, 정보유출 등)"},
-                "weight": {"type": "number", "description": "점수 가중치 (1-100)"},
-                "enabled": {"type": "boolean", "default": true},
-                "match": {"$ref": "#/definitions/MatchCondition"},
-                "aggregate": {"$ref": "#/definitions/UEBAAggregateCondition"},
-                "ueba": {"type": "object", "properties": {"enabled": {"type": "boolean", "default": true}}}
-            },
-            "example": {
-                "name": "USB 차단",
-                "category": "매체제어",
-                "weight": 10,
-                "enabled": true,
-                "match": {
-                    "msgId": "MESSAGE_DEVICE_USAGE",
-                    "logic": "and",
-                    "conditions": [
-                        {"field": "outcome", "op": "eq", "value": "blocked"}
-                    ]
-                },
-                "aggregate": {"type": "count"},
-                "ueba": {"enabled": true}
-            }
+            "description": "UEBA 규칙 생성/수정 요청"
+        },
+        "UEBARule_count": {
+            "type": "object",
+            "description": "횟수 기반 점수: 이벤트 발생 횟수 × weight",
+            "example": {"name": "USB_차단", "category": "매체제어", "weight": 10, "enabled": true, "match": {"msgId": "MESSAGE_DEVICE_USAGE", "conditions": [{"field": "outcome", "op": "eq", "value": "blocked"}]}, "aggregate": {"function": "count"}}
+        },
+        "UEBARule_sum": {
+            "type": "object",
+            "description": "합계 기반 점수: 필드값 합계 × weight",
+            "example": {"name": "대용량_파일반출", "category": "정보유출", "weight": 5, "enabled": true, "match": {"msgId": "MESSAGE_FILE_TRANSFER", "conditions": [{"field": "act", "op": "eq", "value": "upload"}]}, "aggregate": {"function": "sum", "field": "fsize"}}
+        },
+        "UEBARule_cardinality": {
+            "type": "object",
+            "description": "고유값 기반 점수: 고유값 수 × weight",
+            "example": {"name": "다중호스트_접근", "category": "이상행위", "weight": 15, "enabled": true, "match": {"msgId": "MESSAGE_NETWORK_ACCESS"}, "aggregate": {"function": "cardinality", "field": "dhost"}}
+        },
+        "UEBARule_복합조건": {
+            "type": "object",
+            "description": "복합 조건: 여러 조건 조합",
+            "example": {"name": "야간_민감파일_접근", "category": "정보유출", "weight": 20, "enabled": true, "match": {"msgId": "MESSAGE_FILE_ACCESS", "conditions": [{"field": "hour", "op": "time_range", "start": 22, "end": 6}, {"field": "fname", "op": "regex", "value": ".*\\.(xlsx|docx|pdf)$"}]}, "aggregate": {"function": "sum", "field": "fsize"}}
         },
         "MatchCondition": {
             "type": "object",
